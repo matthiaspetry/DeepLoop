@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Ralph ML Loop artifacts
+runs/
+state/
+reports/
+workspace/
+checkpoints/
+logs/
+*.pth
+*.ckpt
+
+# Data
+data/
+datasets/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env
+.venv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+tensorboard/
+wandb/
+mlruns/

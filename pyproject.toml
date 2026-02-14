@@ -1,0 +1,48 @@
+[project]
+name = "ralph-ml-loop"
+version = "0.1.0"
+description = "Autonomous Deep Learning Improvement Cycle - Ralph Loop for ML"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "python-dotenv>=1.0.0",
+    "gitpython>=3.1.0",
+    "aiofiles>=23.0.0",
+    "jsonschema>=4.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ralph_ml"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+ralph-ml = "ralph_ml.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true

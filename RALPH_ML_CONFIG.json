@@ -1,0 +1,47 @@
+{
+  "project": {
+    "name": "my-ml-project",
+    "framework": "pytorch",
+    "task": "image-classification",
+    "target_metric": {
+      "name": "test_accuracy",
+      "value": 0.85
+    }
+  },
+  "data": {
+    "root": "./data",
+    "train_split": "train",
+    "val_split": "val",
+    "test_split": "test"
+  },
+  "safeguards": {
+    "max_cycles": 10,
+    "no_improvement_stop_cycles": 3,
+    "min_improvement_delta": 0.002,
+    "time_limit_per_cycle_minutes": 30,
+    "token_budget_per_cycle": 100000
+  },
+  "execution": {
+    "mode": "local",
+    "python": "python",
+    "train_cmd": "python train.py --config config.json",
+    "eval_cmd": "python eval.py --config config.json",
+    "env_capture": true
+  },
+  "agents": {
+    "code_model": "opencode",
+    "analysis_model": "opencode",
+    "thinking": "medium"
+  },
+  "paths": {
+    "workspace": "./workspace",
+    "runs": "./runs",
+    "reports": "./reports",
+    "state": "./state"
+  },
+  "observability": {
+    "logger": "tensorboard",
+    "save_stdout": true,
+    "emit_events_jsonl": true
+  }
+}
