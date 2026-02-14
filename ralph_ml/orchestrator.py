@@ -30,6 +30,12 @@ from ralph_ml.artifacts import (
     capture_model_artifact,
     write_best_model_index,
 )
+from ralph_ml.artifacts import (
+    capture_architecture_log,
+    capture_source_snapshot,
+    capture_model_artifact,
+    write_best_model_index,
+)
 
 
 class Orchestrator:
