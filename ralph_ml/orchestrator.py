@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,7 @@ class Orchestrator:
         print(f"Prompt: {prompt}")
         print(f"Target: {self.config.project.target_metric.name} >= {self.config.project.target_metric.value}")
         print(f"Safeguards: max {self.config.safeguards.max_cycles} cycles, {self.config.safeguards.time_limit_per_cycle_minutes}min per cycle\n")
+        sys.stdout.flush()
 
         self.state.status = "running"
         self.state.start_time = datetime.now().isoformat()
@@ -82,19 +84,23 @@ class Orchestrator:
                 print(f"\n{'─'*60}")
                 print(f"🔄 CYCLE {cycle_num}")
                 print(f"{'─'*60}\n")
+                sys.stdout.flush()
 
                 cycle_dir = self._get_cycle_dir(cycle_num)
 
                 # Phase 1: Code Generation
                 print("📝 Phase 1: Code Generation...")
+                sys.stdout.flush()
                 self._phase1_codegen(cycle_dir, prompt)
 
                 # Phase 2: Training & Validation
                 print("\n🚀 Phase 2: Training & Validation...")
+                sys.stdout.flush()
                 metrics = self._phase2_training(cycle_dir)
 
                 # Phase 3: Analysis
                 print("\n🔍 Phase 3: Analysis...")
+                sys.stdout.flush()
                 analysis = self._phase3_analysis(cycle_dir, metrics, prompt)
 
                 # Create snapshot
@@ -171,11 +177,29 @@ Requirements:
 
 Write the code files directly."""
 
+        # Use a simpler approach - write prompt to file and use input
+        import os
+
+        # Create a temporary script to run opencode
+        script_content = f'''#!/bin/bash
+cd {self.config.get_paths()["workspace"]}
+echo "{opencode_prompt}" | {self.opencode_path} run
+'''
+
+        script_path = cycle_dir / "run_opencode.sh"
+        script_path.write_text(script_content)
+        script_path.chmod(0o755)
+
+        print(f"   Running OpenCode code generation...")
+        print(f"   Prompt: Create training codebase for {prompt[:50]}...")
+
+        # Run the script
         result = subprocess.run(
-            [self.opencode_path, "run", opencode_prompt],
+            ["bash", str(script_path)],
             capture_output=True,
             text=True,
             cwd=self.config.get_paths()["workspace"],
+            timeout=self.config.safeguards.time_limit_per_cycle_minutes * 60,
         )
 
         # Save output
@@ -184,7 +208,7 @@ Write the code files directly."""
             (cycle_dir / "phase1_opencode_errors.txt").write_text(result.stderr)
 
         print(f"   ✓ Code generation complete")
-        print(f"   Output saved to: {cycle_dir}")
+        print(f"   Output: {result.stdout[:200] if result.stdout else 'No output'}")
 
     def _phase2_training(self, cycle_dir: Path) -> MetricsResult:
         """Phase 2: Training execution.
@@ -275,11 +299,24 @@ analysis.md with summary
 recommendations.json with list of recommendations
 decision.json with action (continue/stop) and rationale"""
 
+        # Use script approach for OpenCode
+        script_content = f'''#!/bin/bash
+cd {self.config.get_paths()["workspace"]}
+echo "{analysis_prompt}" | {self.opencode_path} run
+'''
+
+        script_path = cycle_dir / "run_opencode_analysis.sh"
+        script_path.write_text(script_content)
+        script_path.chmod(0o755)
+
+        print(f"   Running OpenCode analysis...")
+
         result = subprocess.run(
-            [self.opencode_path, "run", analysis_prompt],
+            ["bash", str(script_path)],
             capture_output=True,
             text=True,
             cwd=self.config.get_paths()["workspace"],
+            timeout=self.config.safeguards.time_limit_per_cycle_minutes * 60,
         )
 
         # Save output
