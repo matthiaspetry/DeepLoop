@@ -2,12 +2,8 @@
 
 import json
 import os
-import selectors
 import shutil
-import subprocess
 import sys
-import time
-from hashlib import sha256
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -27,6 +23,12 @@ from ralph_ml.phases.analysis import (
     load_analysis_from_workspace,
     build_fallback_analysis,
     merge_analysis_with_fallback,
+)
+from ralph_ml.artifacts import (
+    capture_architecture_log,
+    capture_source_snapshot,
+    capture_model_artifact,
+    write_best_model_index,
 )
 
 
@@ -568,146 +570,20 @@ Best achieved: {self.state.best_metric} (Cycle {self.state.best_cycle})
     def _capture_architecture_log(self, cycle_dir: Path) -> dict[str, Any]:
         """Capture architecture-relevant file fingerprints for this cycle."""
         workspace = self.config.get_paths()["workspace"]
-        tracked_files = ["model.py", "train.py", "eval.py", "data.py", "config.json"]
-
-        previous_hashes: dict[str, str] = {}
-        if self.state.history:
-            prev_arch = self.state.history[-1].architecture_log or {}
-            prev_files = prev_arch.get("files", {}) if isinstance(prev_arch, dict) else {}
-            for file_name, info in prev_files.items():
-                if isinstance(info, dict) and isinstance(info.get("sha256"), str):
-                    previous_hashes[file_name] = info["sha256"]
-
-        files_payload: dict[str, Any] = {}
-        changed_files: list[str] = []
-
-        for rel_path in tracked_files:
-            full_path = workspace / rel_path
-            if not full_path.exists():
-                files_payload[rel_path] = {"exists": False}
-                continue
-
-            content = full_path.read_text(errors="ignore")
-            digest = sha256(content.encode("utf-8")).hexdigest()
-            line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-
-            previous_digest = previous_hashes.get(rel_path)
-            changed = previous_digest is None or previous_digest != digest
-            if changed:
-                changed_files.append(rel_path)
-
-            files_payload[rel_path] = {
-                "exists": True,
-                "sha256": digest,
-                "line_count": line_count,
-                "bytes": full_path.stat().st_size,
-                "changed_since_prev_cycle": changed,
-            }
-
-        arch_log = {
-            "cycle": self.state.current_cycle + 1,
-            "timestamp": datetime.now().isoformat(),
-            "objective": {
-                "name": self.config.project.target_metric.name,
-                "target_value": self.config.project.target_metric.value,
-                "direction": self.config.project.target_metric.get_direction(),
-            },
-            "changed_files": changed_files,
-            "files": files_payload,
-        }
-
-        arch_log_path = cycle_dir / "architecture_log.json"
-        arch_log["log_path"] = str(arch_log_path)
-        arch_log_path.write_text(json.dumps(arch_log, indent=2))
-
-        print(
-            f"   Architecture log captured: {arch_log_path} (changed files: {changed_files or ['none']})"
+        return capture_architecture_log(
+            workspace, cycle_dir, self.state, self.config.project.target_metric
         )
-        return arch_log
 
     def _capture_source_snapshot(self, cycle_dir: Path) -> str:
         """Copy cycle source files so any cycle can be fully restored later."""
         workspace = self.config.get_paths()["workspace"]
-        tracked_files = ["model.py", "train.py", "eval.py", "data.py", "config.json"]
-        snapshot_dir = cycle_dir / "source_snapshot"
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-
-        copied: list[str] = []
-        for rel_path in tracked_files:
-            source_path = workspace / rel_path
-            if not source_path.exists() or not source_path.is_file():
-                continue
-
-            target_path = snapshot_dir / rel_path
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, target_path)
-            copied.append(rel_path)
-
-        manifest = {
-            "cycle": self.state.current_cycle + 1,
-            "timestamp": datetime.now().isoformat(),
-            "files": copied,
-        }
-        (snapshot_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
-        print(f"   Source snapshot saved: {snapshot_dir} (files: {copied or ['none']})")
-        return str(snapshot_dir)
+        return capture_source_snapshot(workspace, cycle_dir, self.state.current_cycle + 1)
 
     def _capture_model_artifact(self, cycle_dir: Path) -> Optional[str]:
         """Copy best model artifact for this cycle into cycle artifacts directory."""
         workspace = self.config.get_paths()["workspace"]
-        candidates = [
-            workspace / "best_model.pt",
-            workspace / "artifacts" / "best_model.pt",
-            workspace / "outputs" / "best_model.pt",
-            workspace / "model.pth",
-            workspace / "checkpoint.pt",
-        ]
-
-        artifact_source = next((p for p in candidates if p.exists() and p.is_file()), None)
-        if artifact_source is None:
-            return None
-
-        artifact_dir = cycle_dir / "artifacts"
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        target_path = artifact_dir / artifact_source.name
-        shutil.copy2(artifact_source, target_path)
-        return str(target_path)
+        return capture_model_artifact(workspace, cycle_dir)
 
     def _write_best_model_index(self) -> None:
         """Write a single JSON pointer for the current best model."""
-        index_path = self.state_path.parent.parent / "best_model_index.json"
-
-        target = self.config.project.target_metric
-        payload: dict[str, Any] = {
-            "updated_at": datetime.now().isoformat(),
-            "objective": {
-                "name": target.name,
-                "direction": target.get_direction(),
-                "target_value": target.value,
-                "comparator": target.comparator_symbol(),
-            },
-            "best_cycle": self.state.best_cycle,
-            "best_metric": self.state.best_metric,
-            "target_met": False,
-            "best_model_artifact": None,
-            "best_architecture_log": None,
-            "best_source_snapshot": None,
-        }
-
-        if self.state.best_cycle > 0 and len(self.state.history) >= self.state.best_cycle:
-            best_snapshot = self.state.history[self.state.best_cycle - 1]
-            metric_value = best_snapshot.metrics.result.model_dump().get(target.name)
-            if isinstance(metric_value, (int, float)):
-                payload["best_metric"] = float(metric_value)
-                payload["target_met"] = target.target_is_met(float(metric_value))
-
-            if best_snapshot.best_model_artifact:
-                payload["best_model_artifact"] = best_snapshot.best_model_artifact
-
-            if best_snapshot.architecture_log and isinstance(best_snapshot.architecture_log, dict):
-                payload["best_architecture_log"] = best_snapshot.architecture_log.get("log_path")
-
-            if best_snapshot.source_snapshot_dir:
-                payload["best_source_snapshot"] = best_snapshot.source_snapshot_dir
-
-        index_path.write_text(json.dumps(payload, indent=2))
+        write_best_model_index(self.state_path, self.state, self.config.project.target_metric)
