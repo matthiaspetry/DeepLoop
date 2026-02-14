@@ -31,7 +31,12 @@ class Orchestrator:
         self.config = config
         self.state_path = state_path or config.get_paths()["state"] / "ralph_state.json"
         self.state = self._load_state()
-        self.opencode_path = "/root/.opencode/bin/opencode"
+
+        # Determine OpenCode path (mock or real)
+        if config.agents.code_model == "mock_opencode":
+            self.opencode_path = "/root/.openclaw/workspace/ralph-ml-loop/mock_opencode.py"
+        else:
+            self.opencode_path = "/root/.opencode/bin/opencode"
 
     def _load_state(self) -> RalphState:
         """Load state from file if exists, otherwise create new."""
