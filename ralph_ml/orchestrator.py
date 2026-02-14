@@ -20,6 +20,8 @@ from ralph_ml.config import (
     RalphState,
     Recommendation,
 )
+from ralph_ml.stopping import should_stop
+from ralph_ml.runtime.process_runner import run_with_heartbeat, run_training_with_live_logs
 
 
 class Orchestrator:
@@ -84,41 +86,9 @@ class Orchestrator:
         input_text: Optional[str] = None,
     ) -> tuple[int, str, str, float, bool]:
         """Run subprocess and print periodic progress until completion."""
-        start = time.time()
-        proc = subprocess.Popen(
-            command,
-            cwd=cwd,
-            stdin=subprocess.PIPE if input_text is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+        return run_with_heartbeat(
+            command, cwd, timeout_seconds, phase_label, heartbeat_seconds, input_text
         )
-
-        timed_out = False
-        while True:
-            elapsed = time.time() - start
-            remaining = timeout_seconds - elapsed
-
-            if remaining <= 0:
-                timed_out = True
-                proc.kill()
-                stdout, stderr = proc.communicate()
-                break
-
-            wait_chunk = min(heartbeat_seconds, max(1, int(remaining)))
-            try:
-                stdout, stderr = proc.communicate(input=input_text, timeout=wait_chunk)
-                break
-            except subprocess.TimeoutExpired:
-                input_text = None
-                elapsed = time.time() - start
-                print(
-                    f"   ... {phase_label} still running ({elapsed:.0f}s / {timeout_seconds}s, pid={proc.pid})"
-                )
-                sys.stdout.flush()
-
-        elapsed_total = time.time() - start
-        return (proc.returncode or 0), stdout, stderr, elapsed_total, timed_out
 
     def _run_training_with_live_logs(
         self,
@@ -128,87 +98,7 @@ class Orchestrator:
         heartbeat_seconds: int = 10,
     ) -> tuple[int, str, str, float, bool]:
         """Run training and stream stdout/stderr lines live."""
-        start = time.time()
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        proc = subprocess.Popen(
-            command,
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-        timed_out = False
-        last_heartbeat = start
-
-        sel = selectors.DefaultSelector()
-        if proc.stdout is not None:
-            sel.register(proc.stdout, selectors.EVENT_READ)
-        if proc.stderr is not None:
-            sel.register(proc.stderr, selectors.EVENT_READ)
-
-        while True:
-            now = time.time()
-            elapsed = now - start
-
-            if elapsed > timeout_seconds:
-                timed_out = True
-                proc.kill()
-                break
-
-            events = sel.select(timeout=1.0)
-            for key, _ in events:
-                line = key.fileobj.readline()
-                if not line:
-                    continue
-
-                if proc.stdout is not None and key.fileobj is proc.stdout:
-                    stdout_lines.append(line)
-                    print(f"   [train] {line.rstrip()}")
-                else:
-                    stderr_lines.append(line)
-                    print(f"   [train:err] {line.rstrip()}")
-                sys.stdout.flush()
-
-            if proc.poll() is not None:
-                break
-
-            if now - last_heartbeat >= heartbeat_seconds:
-                print(
-                    f"   ... Phase 2 training still running ({elapsed:.0f}s / {timeout_seconds}s, pid={proc.pid})"
-                )
-                sys.stdout.flush()
-                last_heartbeat = now
-
-        if proc.stdout is not None:
-            remainder = proc.stdout.read()
-            if remainder:
-                stdout_lines.append(remainder)
-                for line in remainder.splitlines():
-                    print(f"   [train] {line}")
-        if proc.stderr is not None:
-            remainder = proc.stderr.read()
-            if remainder:
-                stderr_lines.append(remainder)
-                for line in remainder.splitlines():
-                    print(f"   [train:err] {line}")
-
-        sel.close()
-        proc.wait()
-        elapsed_total = time.time() - start
-        return (
-            proc.returncode or 0,
-            "".join(stdout_lines),
-            "".join(stderr_lines),
-            elapsed_total,
-            timed_out,
-        )
+        return run_training_with_live_logs(command, cwd, timeout_seconds, heartbeat_seconds)
 
     def run(self, prompt: str) -> None:
         """Run the Ralph ML Loop.
@@ -302,38 +192,7 @@ class Orchestrator:
 
     def _should_stop(self) -> bool:
         """Check if we should stop before starting a cycle."""
-        # Check no-improvement stop
-        if len(self.state.history) >= self.config.safeguards.no_improvement_stop_cycles:
-            recent_cycles = self.state.history[-self.config.safeguards.no_improvement_stop_cycles :]
-            values = []
-            for snapshot in recent_cycles:
-                value = snapshot.metrics.result.model_dump().get(snapshot.metrics.target.name)
-                if isinstance(value, (int, float)):
-                    values.append(float(value))
-
-            if len(values) == len(recent_cycles):
-                direction = self.config.project.target_metric.get_direction()
-                min_delta = self.config.safeguards.min_improvement_delta
-                deltas = []
-                for idx in range(1, len(values)):
-                    if direction == "minimize":
-                        deltas.append(values[idx - 1] - values[idx])
-                    else:
-                        deltas.append(values[idx] - values[idx - 1])
-
-                if deltas and all(delta < min_delta for delta in deltas):
-                    print(
-                        f"\n⚠️  No significant improvement (delta < {min_delta}) for {self.config.safeguards.no_improvement_stop_cycles} cycles"
-                    )
-                    return True
-
-            elif values and all(v == values[0] for v in values):
-                print(
-                    f"\n⚠️  No improvement for {self.config.safeguards.no_improvement_stop_cycles} cycles"
-                )
-                return True
-
-        return False
+        return should_stop(self.state, self.config)
 
     def _phase1_codegen(self, cycle_dir: Path, prompt: str) -> None:
         """Phase 1: Code generation using OpenCode.
