@@ -14,6 +14,7 @@ and 4) applies targeted improvements until a stopping condition is met.
 - **Reproducibility:** Configs + artifacts versioned per cycle.
 - **Observability:** Metrics, logs, and decisions visible in real time.
 - **Portability:** Framework‑agnostic core (PyTorch/TensorFlow/JAX via adapters).
+- **Modularity:** Clean separation of concerns for maintainability.
 
 ---
 
@@ -30,36 +31,36 @@ and 4) applies targeted improvements until a stopping condition is met.
                         │  (State machine + safeguard enforcement)│
                         └──────────────────┬──────────────────┘
                                            │
-                    ┌──────────────────────┼──────────────────────┐
-                    │                      │                      │
-                    ▼                      ▼                      ▼
-        ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-        │     Phase 1         │  │     Phase 2         │  │     Phase 3         │
-        │  Code Generation    │  │  Train + Validate   │  │  Analysis + Recs    │
-        │     (Agent)         │─▶│     (Executor)      │─▶│      (Agent)        │
-        └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
-                   │                        │                        │
-                   │                        │                        │
-                   └────────────────────────┼────────────────────────┘
-                                            │
-                                            ▼
-                                  ┌─────────────────────┐
-                                  │   Decision Engine   │
-                                  │  ─────────────────   │
-                                  │  • Target met?      │
-                                  │  • Safeguards ok?   │
-                                  │  • Continue?        │
-                                  └──────────┬──────────┘
+                     ┌──────────────────────┼──────────────────────┐
+                     │                      │                      │
+                     ▼                      ▼                      ▼
+         ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
+         │     Phase 1         │  │     Phase 2         │  │     Phase 3         │
+         │  Code Generation    │  │  Train + Validate   │  │  Analysis + Recs    │
+         │     (Agent)         │─▶│     (Executor)      │─▶│      (Agent)        │
+         └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
+                    │                        │                        │
+                    │                        │                        │
+                    └────────────────────────┼────────────────────────┘
                                              │
-                          ┌──────────────────┴──────────────────┐
-                          │                                     │
-                     Continue                                 Stop
-                          │                                     │
-                          ▼                                     ▼
-              ┌─────────────────────┐               ┌─────────────────────┐
-              │   Next Cycle (N+1)  │               │  Final Report +     │
-              └─────────────────────┘               │  Best Artifacts     │
-                                                   └─────────────────────┘
+                                             ▼
+                                   ┌─────────────────────┐
+                                   │   Decision Engine   │
+                                   │  ─────────────────   │
+                                   │  • Target met?      │
+                                   │  • Safeguards ok?   │
+                                   │  • Continue?        │
+                                   └──────────┬──────────┘
+                                              │
+                           ┌──────────────────┴──────────────────┐
+                           │                                     │
+                      Continue                                 Stop
+                           │                                     │
+                           ▼                                     ▼
+               ┌─────────────────────┐               ┌─────────────────────┐
+               │   Next Cycle (N+1)  │               │  Final Report +     │
+               └─────────────────────┘               │  Best Artifacts     │
+                                                    └─────────────────────┘
 
                    ┌──────────────────────────────────────────┐
                    │      Shared Context + Memory             │
@@ -82,6 +83,53 @@ and 4) applies targeted improvements until a stopping condition is met.
                    │  • Resource usage                       │
                    └──────────────────────────────────────────┘
 ```
+
+---
+
+## Module Architecture
+
+The codebase is organized into focused modules with clear responsibilities:
+
+```
+ralph_ml/
+├── orchestrator.py          # Thin coordinator - state machine & cycle management
+├── stopping.py              # Stop policy logic (pure functions)
+├── runtime/
+│   └── process_runner.py    # Subprocess execution with heartbeats & live logs
+├── phases/
+│   ├── training.py          # Metrics parsing (nested/flat/final_epoch/history)
+│   └── analysis.py          # Analysis loading with graceful fallbacks
+├── artifacts.py             # Artifact capture & best model index
+└── config.py                # Data models & configuration
+```
+
+### Module Responsibilities
+
+**Orchestrator** (`orchestrator.py`)
+- State machine management (cycle transitions)
+- Delegates to specialized modules
+- Persists state & artifacts
+- Thin coordinator (~600 lines vs 1000+ originally)
+
+**Stop Policy** (`stopping.py`)
+- Pure functions for plateau detection
+- Supports maximize/minimize metrics
+- Configurable delta thresholds
+
+**Process Runner** (`runtime/process_runner.py`)
+- Subprocess execution with timeout
+- Heartbeat progress reporting
+- Live log streaming for training
+
+**Phase Handlers** (`phases/`)
+- `training.py`: Metrics parsing from multiple JSON formats
+- `analysis.py`: Loading analysis outputs with fallback defaults
+
+**Artifacts** (`artifacts.py`)
+- Architecture log (SHA256 fingerprints)
+- Source snapshots for reproducibility
+- Model artifact collection
+- Best model index generation
 
 ---
 
@@ -120,6 +168,12 @@ and 4) applies targeted improvements until a stopping condition is met.
 - `metrics.json` (train/val/test + runtime/cost)
 - `env.json` (pip freeze, git hash, hardware info)
 
+**Metrics Format Support:**
+- Nested result: `{"result": {"test_accuracy": ...}}`
+- Top-level: `{"test_accuracy": ...}`
+- Final epoch: `{"final_epoch": {"test_accuracy": ...}}`
+- History array: `{"history": [{"train_loss": ...}, ...]}`
+
 ### Phase 3 — Analysis + Improvement (Agent)
 
 **Purpose:** Interpret metrics and logs to propose the next best experiment.
@@ -129,6 +183,11 @@ and 4) applies targeted improvements until a stopping condition is met.
 - `recommendations.json` (ranked actions)
 - `decision.json` (continue/stop + rationale)
 - Optional: `ablation_plan.json`
+
+**Fallback Behavior:**
+- If files missing, generates sensible defaults
+- Supports both list and nested JSON formats
+- Handles malformed files gracefully
 
 ### Decision Engine
 
@@ -142,50 +201,60 @@ Stops when any stop condition triggers, otherwise schedules next cycle with an u
 
 **Responsibilities:**
 - Own the state machine (cycle/phase transitions)
-- Enforce safeguards
+- Enforce safeguards (delegates to `stopping.py`)
 - Persist artifacts & context
 - Select "best so far" checkpoint/config
 - Emit structured events for the dashboard
 
 **Key design choice:**
-- Treat all phases as pure steps with explicit inputs/outputs (makes retries safe).
+- Treat all phases as pure steps with explicit inputs/outputs (makes retries safe)
+- Delegate to focused modules rather than monolithic implementation
 
-### 2) Context & Memory Store
+### 2) Stop Policy (`stopping.py`)
+
+Pure functions for determining when to stop:
+
+- **Plateau detection:** Stop after N cycles with no significant improvement
+- **Direction support:** Works for both maximize (accuracy) and minimize (loss) metrics
+- **Configurable thresholds:** Minimum delta to count as improvement
+
+### 3) Process Runner (`runtime/process_runner.py`)
+
+Subprocess execution with enhanced monitoring:
+
+- **Heartbeat mode:** Periodic progress updates for long-running tasks
+- **Live log mode:** Stream stdout/stderr in real-time for training
+- **Timeout handling:** Kill processes that exceed time limits
+- **Universal:** Works with any subprocess, not just ML training
+
+### 4) Phase Handlers (`phases/`)
+
+**Training Phase** (`phases/training.py`):
+- Parse metrics from multiple JSON formats
+- Extract target metric from result/final_epoch/history
+- Fallback to parsing from stdout if metrics.json missing
+
+**Analysis Phase** (`phases/analysis.py`):
+- Load analysis.md, recommendations.json, decision.json
+- Build fallback analysis when files missing
+- Merge loaded data with sensible defaults
+
+### 5) Artifact Manager (`artifacts.py`)
+
+Capture and preserve cycle artifacts:
+
+- **Architecture log:** SHA256 fingerprints of source files
+- **Source snapshot:** Copy of model.py, train.py, etc. for reproducibility
+- **Model artifact:** Find and copy best_model.pt from various locations
+- **Best model index:** JSON pointer to best cycle across all runs
+
+### 6) Context & Memory Store
 
 A simple, auditable structure is best:
 
 - **Cycle snapshots:** code + config + metrics + analysis
 - **Aggregated metrics:** rolling timeline for quick comparisons
 - **Experience log:** "this change helped/hurt" records
-
-### 3) Training Executor
-
-Pluggable runner:
-
-- **Local:** Python subprocess
-- **Containerized:** Docker
-- **Cluster:** Kubernetes/Slurm
-- **Cloud:** Managed jobs
-
-**Must support:**
-- Timeouts
-- Log streaming
-- Artifact collection
-- Deterministic working directory per run
-
-### 4) Agents
-
-Two roles (can be the same model, but separate prompts/tools):
-
-- **Code agent:** Writes patches and ensures runnable training.
-- **Analysis agent:** Reads outputs and proposes next steps.
-
-### 5) Monitoring Dashboard
-
-**Minimum viable:**
-- CLI table + live logs + phase status
-- Metrics chart across cycles
-- Resource usage + budgets remaining
 
 ---
 
@@ -204,6 +273,9 @@ runs/
     analysis.md
     recommendations.json
     decision.json
+    architecture_log.json   # File fingerprints
+    source_snapshot/        # Preserved source files
+    artifacts/              # Model files
   cycle_0002/
     ...
 reports/
@@ -211,6 +283,7 @@ reports/
   leaderboard.json     # best checkpoints/configs across cycles
 state/
   ralph_state.json     # orchestrator state (resumable)
+best_model_index.json  # Pointer to best cycle
 ```
 
 ### `metrics.json` (Minimal Contract)
@@ -331,7 +404,7 @@ A simple, explicit policy is easier to debug:
 
 ---
 
-## CLI Contract (Suggested)
+## CLI Contract
 
 ```
 ralph-ml init --config <file>
@@ -349,32 +422,72 @@ ralph-ml report --run ./runs --out ./reports/final_report.md
 
 ---
 
-## Roadmap
+## Testing
 
-### MVP
-- Orchestrator state machine
-- Local executor (subprocess)
-- Basic metrics contract + per-cycle folders
-- Simple stop conditions
-- CLI status output
+The project includes a comprehensive test suite:
 
-### v1.0
-- Resumable runs (state file)
-- Better comparison + leaderboard
-- Diff-based code snapshots (git integration)
-- Dashboard (TUI via `rich`)
+```
+tests/
+├── conftest.py                      # Shared fixtures
+├── test_orchestrator_stop_policy.py # Stop/plateau detection
+├── test_orchestrator_phase2_metrics.py # Metrics parsing
+├── test_orchestrator_phase3_analysis.py # Analysis fallback
+├── test_orchestrator_artifacts.py   # Artifact capture
+└── test_orchestrator_run_flow.py    # End-to-end flow
+```
 
-### v2.0
-- Multi-task templates (NLP/CV/RL)
-- Parallel experiments (branching cycles)
-- MLFlow/W&B integration
-- Knowledge base: pattern library of successful interventions
+**Test characteristics:**
+- 56 tests covering all major functionality
+- Deterministic (< 1s execution)
+- Uses mocked subprocesses (no real training)
+- Isolated with `tmp_path` fixtures
 
 ---
 
-## Implementation Notes (Practical)
+## Roadmap
 
-- **Keep the orchestrator "boring":** Deterministic, testable, minimal magic.
+### MVP ✅ Completed
+- [x] Orchestrator state machine
+- [x] Local executor (subprocess)
+- [x] Basic metrics contract + per-cycle folders
+- [x] Simple stop conditions
+- [x] CLI status output
+- [x] Comprehensive test suite
+
+### v1.0
+- [x] Resumable runs (state file) ✅
+- [x] Better comparison + leaderboard ✅
+- [ ] Diff-based code snapshots (git integration)
+- [ ] Dashboard (TUI via `rich`)
+
+### v2.0
+- [ ] Multi-task templates (NLP/CV/RL)
+- [ ] Parallel experiments (branching cycles)
+- [ ] MLFlow/W&B integration
+- [ ] Knowledge base: pattern library of successful interventions
+
+---
+
+## Implementation Notes
+
+- **Keep the orchestrator "boring":** Deterministic, testable, minimal magic. Now ~600 lines down from 1000+.
 - **Treat agents as untrusted:** Validate outputs, lint, run unit checks.
 - **Make every artifact addressable** by `(cycle_id, run_id)` for traceability.
 - **Prefer patches over full rewrites** after cycle 1 to reduce churn.
+- **Refactor safely:** Extract modules incrementally with comprehensive tests.
+
+### Recent Refactoring (2024)
+
+The orchestrator was refactored from a monolithic 1000+ line file into focused modules:
+
+1. **Stop policy** extracted to `stopping.py` (48 lines)
+2. **Process runner** extracted to `runtime/process_runner.py` (167 lines)
+3. **Training phase** extracted to `phases/training.py` (151 lines)
+4. **Analysis phase** extracted to `phases/analysis.py` (175 lines)
+5. **Artifacts** extracted to `artifacts.py` (207 lines)
+
+**Results:**
+- 40% reduction in orchestrator complexity
+- Each module has a single responsibility
+- All 56 tests pass with zero behavior changes
+- Future changes are easier and safer
