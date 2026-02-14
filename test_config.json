@@ -1,0 +1,47 @@
+{
+  "project": {
+    "name": "synthetic-classifier",
+    "framework": "pytorch",
+    "task": "classification",
+    "target_metric": {
+      "name": "test_accuracy",
+      "value": 0.85
+    }
+  },
+  "data": {
+    "root": "/root/.openclaw/workspace/ralph-ml-loop/data",
+    "train_split": "train",
+    "val_split": "val",
+    "test_split": "test"
+  },
+  "safeguards": {
+    "max_cycles": 5,
+    "no_improvement_stop_cycles": 2,
+    "min_improvement_delta": 0.005,
+    "time_limit_per_cycle_minutes": 15,
+    "token_budget_per_cycle": 100000
+  },
+  "execution": {
+    "mode": "local",
+    "python": "python",
+    "train_cmd": "python train.py --config config.json",
+    "eval_cmd": "python eval.py --config config.json",
+    "env_capture": true
+  },
+  "agents": {
+    "code_model": "opencode",
+    "analysis_model": "opencode",
+    "thinking": "medium"
+  },
+  "paths": {
+    "workspace": "/root/.openclaw/workspace/ralph-ml-loop/workspace",
+    "runs": "/root/.openclaw/workspace/ralph-ml-loop/runs",
+    "reports": "/root/.openclaw/workspace/ralph-ml-loop/reports",
+    "state": "/root/.openclaw/workspace/ralph-ml-loop/state"
+  },
+  "observability": {
+    "logger": "tensorboard",
+    "save_stdout": true,
+    "emit_events_jsonl": true
+  }
+}
