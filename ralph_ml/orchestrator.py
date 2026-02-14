@@ -22,6 +22,7 @@ from ralph_ml.config import (
 )
 from ralph_ml.stopping import should_stop
 from ralph_ml.runtime.process_runner import run_with_heartbeat, run_training_with_live_logs
+from ralph_ml.phases.training import parse_metrics_from_file, parse_metrics_from_output
 
 
 class Orchestrator:
@@ -318,70 +319,11 @@ Write the code files directly."""
 
         # Load metrics if available
         metrics_path = workspace / "metrics.json"
-        if metrics_path.exists():
-            with open(metrics_path) as f:
-                metrics_data = json.load(f)
+        metrics = parse_metrics_from_file(metrics_path, self.config.project.target_metric)
 
-            # Support both formats:
-            # 1) {"result": {"test_accuracy": ...}}
-            # 2) {"test_accuracy": ..., "val_accuracy": ..., ...}
-            raw_result = metrics_data.get("result")
-            result_source = raw_result if isinstance(raw_result, dict) else metrics_data
-
-            test_accuracy = result_source.get("test_accuracy")
-            if test_accuracy is None:
-                test_accuracy = result_source.get("best_test_accuracy")
-
-            final_epoch = metrics_data.get("final_epoch")
-            if test_accuracy is None and isinstance(final_epoch, dict):
-                test_accuracy = final_epoch.get("test_accuracy")
-
-            train_loss = result_source.get("train_loss")
-            val_loss = result_source.get("val_loss")
-            if isinstance(final_epoch, dict):
-                if train_loss is None:
-                    train_loss = final_epoch.get("train_loss")
-                if val_loss is None:
-                    val_loss = final_epoch.get("val_loss")
-
-            # Common fallback when losses are only stored per-epoch in history
-            history = metrics_data.get("history")
-            if isinstance(history, list) and history:
-                last_entry = history[-1] if isinstance(history[-1], dict) else {}
-                if train_loss is None:
-                    train_loss = last_entry.get("train_loss")
-                if val_loss is None:
-                    val_loss = last_entry.get("val_loss")
-
-            val_accuracy = result_source.get("val_accuracy")
-            if val_accuracy is None:
-                val_accuracy = result_source.get("best_val_accuracy")
-            if val_accuracy is None and isinstance(final_epoch, dict):
-                val_accuracy = final_epoch.get("val_accuracy")
-
-            target_name = self.config.project.target_metric.name
-            target_value = result_source.get(target_name)
-            if target_value is None and isinstance(final_epoch, dict):
-                target_value = final_epoch.get(target_name)
-            if target_value is None and isinstance(history, list) and history:
-                last_entry = history[-1] if isinstance(history[-1], dict) else {}
-                target_value = last_entry.get(target_name)
-
-            result_payload: dict[str, Any] = {
-                "test_accuracy": test_accuracy,
-                "val_accuracy": val_accuracy,
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-            }
-            if isinstance(target_value, (int, float)):
-                result_payload[target_name] = float(target_value)
-
-            metrics = MetricsResult(
-                cycle=self.state.current_cycle + 1,
-                target=self.config.project.target_metric,
-                result=MetricsResult.ResultMetrics(**result_payload),
-                runtime=MetricsResult.Runtime(train_seconds=train_seconds),
-            )
+        if metrics is not None:
+            metrics.cycle = self.state.current_cycle + 1
+            metrics.runtime.train_seconds = train_seconds
 
             parsed_target = metrics.result.model_dump().get(self.config.project.target_metric.name)
             print(
@@ -389,7 +331,7 @@ Write the code files directly."""
             )
         else:
             # Parse from output if no metrics.json
-            metrics = self._parse_metrics_from_output(train_stdout)
+            metrics = parse_metrics_from_output(train_stdout, self.config.project.target_metric)
             metrics.cycle = self.state.current_cycle + 1
             metrics.runtime.train_seconds = train_seconds
 
@@ -631,53 +573,6 @@ Current cycle metrics:
 Objective: {self.config.project.target_metric.get_direction()} {self.config.project.target_metric.name}
 Best achieved: {self.state.best_metric} (Cycle {self.state.best_cycle})
 """
-
-    def _parse_metrics_from_output(self, output: str) -> MetricsResult:
-        """Parse metrics from training output."""
-        # Simple parsing - in real implementation would be more robust
-        metrics = MetricsResult(
-            cycle=0,
-            target=self.config.project.target_metric,
-        )
-
-        # Try to find accuracy in output
-        for line in output.split("\n"):
-            target_name = self.config.project.target_metric.name.lower()
-            if target_name in line.lower():
-                try:
-                    import re
-
-                    numbers = re.findall(r"[0-9]+(?:\.[0-9]+)?", line)
-                    if numbers:
-                        setattr(
-                            metrics.result,
-                            self.config.project.target_metric.name,
-                            float(numbers[-1]),
-                        )
-                except Exception:
-                    pass
-
-            if "test_accuracy" in line.lower() or "test accuracy" in line.lower():
-                try:
-                    # Extract number
-                    import re
-
-                    match = re.search(r"[0-9.]+", line)
-                    if match:
-                        metrics.result.test_accuracy = float(match.group())
-                except Exception:
-                    pass
-            elif "val_accuracy" in line.lower() or "val accuracy" in line.lower():
-                try:
-                    import re
-
-                    match = re.search(r"[0-9.]+", line)
-                    if match:
-                        metrics.result.val_accuracy = float(match.group())
-                except Exception:
-                    pass
-
-        return metrics
 
     def _print_cycle_results(self, snapshot: CycleSnapshot) -> None:
         """Print results of a cycle."""
