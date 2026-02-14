@@ -1,529 +1,348 @@
-# Ralph Loop for Deep Learning Training
-## Autonomous Model Improvement Cycle
+# Ralph ML Loop
+## Autonomous Deep Learning Improvement Cycle (Spec)
 
-### Core Concept
-A Ralph Loop adapted specifically for deep learning model training — using AI agents to continuously improve models through cycles of code generation, training, validation, and iterative refinement.
+A Ralph ML Loop is an orchestrated, safeguard‑driven system that repeatedly:
+1) generates or modifies training code, 2) runs training + evaluation, 3) analyzes results,
+and 4) applies targeted improvements until a stopping condition is met.
 
-### Architecture Overview
+---
 
-```
-                    ┌─────────────────────────────────────────────────────┐
-                    │              RALPH ML LOOP ORCHESTRATOR              │
-                    │         (Coordinates all cycles & safeguards)       │
-                    └─────────────────────────────────────────────────────┘
-                                          │
-                                          │ cycle_start()
-                                          ▼
+## Design Goals
 
-        ╔═══════════════════════════════════════════════════════════════╗
-        ║                    CYCLE N (Repeat until target)              ║
-        ╠═══════════════════════════════════════════════════════════════╣
-        ║                                                               ║
-        ║  ┌──────────────────┐         ┌──────────────────┐            ║
-        ║  │   PHASE 1        │         │   PHASE 2        │            ║
-        ║  │   Code Gen       │────────▶│   Training       │────────▶   ║
-        ║  │   (OpenCode)     │         │   + Validation   │            ║
-        ║  └────────┬─────────┘         └────────┬─────────┘            ║
-        ║           │                            │                      ║
-        ║           │ Generates:                 │ Executes:            ║
-        ║           │ - Model code               │ - Training           ║
-        ║           │ - Config                   │ - Validation         ║
-        ║           │ - Data pipeline            │ - Logging            ║
-        ║           │                            │                      ║
-        ║           └───────────┬────────────────┘                      ║
-        ║                       │                                       ║
-        ║                       ▼                                       ║
-        ║              ┌──────────────────┐                            ║
-        ║              │   PHASE 3        │                            ║
-        ║              │   Analysis        │                            ║
-        ║              │   (OpenCode)      │                            ║
-        ║              └────────┬─────────┘                            ║
-        ║                       │                                       ║
-        ║                       │ Analyzes:                             ║
-        ║                       │ - Training logs                      ║
-        ║                       │ - Metrics                             ║
-        ║                       │ - Generates improvements              ║
-        ║                       │                                       ║
-        ║                       └───────────┬─────────────────────────┐   ║
-        ║                                   │                         │   ║
-        ║                    ┌──────────────▼─────────┐   ┌───────────▼───┐ ║
-        ║                    │   DECISION ENGINE     │   │   SAFEGUARDS   │ ║
-        ║                    │                      │   │                │ ║
-        ║                    │ ✓ Target met?        │   │ • Max cycles  │ ║
-        ║                    │ ✓ No improvement?    │   │ • Time limit   │ ║
-        ║                    │ ✓ Token budget ok?   │   │ • Token budget │ ║
-        ║                    └──────────┬───────────┘   └────────────────┘ ║
-        ║                               │                                   ║
-        ║                    ┌──────────┴──────────┐                        ║
-        ║                    │                     │                        ║
-        ║              Continue?                  Stop?                      ║
-        ║                    │                     │                        ║
-        ║                    ▼                     ▼                        ║
-        ║            ┌─────────────┐      ┌──────────────┐                  ║
-        ║            │ Next Cycle  │      │ Final Report │                  ║
-        ║            │ (N+1)       │      │              │                  ║
-        ║            └──────┬──────┘      └──────────────┘                  ║
-        ║                   │                                               ║
-        ║                   └───────┬───────────────────────────────────────║
-        ║                           │                                       ║
-        ║                           ▼                                       ║
-        ║              ┌──────────────────────────┐                        ║
-        ║              │  SHARED CONTEXT & MEMORY │                        ║
-        ║              │  ─────────────────────── │                        ║
-        ║              │  • Cycle history         │                        ║
-        ║              │  • Metrics over time     │                        ║
-        ║              │  • What worked/didn't     │                        ║
-        ║              │  • Best configurations   │                        ║
-        ║              └──────────────────────────┘                        ║
-        ╚═══════════════════════════════════════════════════════════════╝
-                                          │
-                                          ▼
-                            ┌───────────────────────┐
-                            │   MONITORING DASHBOARD │
-                            │   ───────────────────  │
-                            │   • Live cycle status   │
-                            │   • Real-time metrics   │
-                            │   • Resource usage      │
-                            │   • Agent activity log  │
-                            └───────────────────────┘
+- **Reliable iteration:** Repeatable cycles with clear inputs/outputs.
+- **Safety by default:** Hard caps on cycles, time, and token/compute spend.
+- **Reproducibility:** Configs + artifacts versioned per cycle.
+- **Observability:** Metrics, logs, and decisions visible in real time.
+- **Portability:** Framework‑agnostic core (PyTorch/TensorFlow/JAX via adapters).
+
+---
+
+## High-Level Architecture
+
+```mermaid
+graph TB
+    U[User config + target] --> O[Orchestrator]
+
+    subgraph Cycle["Cycle N"]
+        CG[Phase 1: Code generation (agent)] --> TR[Phase 2: Train + validate (executor)]
+        TR --> AN[Phase 3: Analysis + recommendations (agent)]
+        AN --> DE[Decision engine]
+    end
+
+    O --> CG
+    DE -->|continue| CG
+    DE -->|stop| FR[Final report + best artifacts]
+
+    subgraph Shared["Shared context + memory"]
+        H[Cycle history]
+        M[Metrics timeline]
+        K[What worked / didn't]
+        B[Best checkpoints + configs]
+    end
+
+    TR --> Shared
+    AN --> Shared
+    O --> Shared
+    Shared --> CG
+
+    O --> MON[Monitoring dashboard]
+    TR --> MON
+    AN --> MON
+    DE --> MON
 ```
 
 ---
 
-### System Flow (Side View)
+## Lifecycle (What Happens Each Cycle)
+
+### Inputs (Per Cycle)
+
+- Project target (e.g., `test_accuracy >= 0.92`)
+- Current best checkpoint + config
+- Previous cycle analysis + recommendations
+- Codebase state (git commit or snapshot)
+- Safeguard budgets remaining (cycles/time/tokens/compute)
+
+### Phase 1 — Code Generation (Agent)
+
+**Purpose:** Produce a runnable training package (or patch) consistent with the target.
+
+**Typical outputs:**
+- `model.py`, `train.py`, `data.py`, `eval.py`
+- `config.json` (or TOML/YAML)
+- `requirements.txt` / `pyproject.toml`
+- A diff or snapshot of changes
+
+**Hard requirements:**
+- Deterministic seeds (when possible)
+- Single command entrypoint
+- Machine-readable metrics output (`metrics.json`)
+
+### Phase 2 — Training + Validation (Executor)
+
+**Purpose:** Run training with the produced code/config and record artifacts.
+
+**Typical outputs:**
+- `checkpoints/` (latest + best)
+- `logs/` (tensorboard/wandb/mlflow, stdout, system stats)
+- `metrics.json` (train/val/test + runtime/cost)
+- `env.json` (pip freeze, git hash, hardware info)
+
+### Phase 3 — Analysis + Improvement (Agent)
+
+**Purpose:** Interpret metrics and logs to propose the next best experiment.
+
+**Typical outputs:**
+- `analysis.md`
+- `recommendations.json` (ranked actions)
+- `decision.json` (continue/stop + rationale)
+- Optional: `ablation_plan.json`
+
+### Decision Engine
+
+Stops when any stop condition triggers, otherwise schedules next cycle with an updated plan.
+
+---
+
+## Core Components
+
+### 1) Orchestrator
+
+**Responsibilities:**
+- Own the state machine (cycle/phase transitions)
+- Enforce safeguards
+- Persist artifacts & context
+- Select "best so far" checkpoint/config
+- Emit structured events for the dashboard
+
+**Key design choice:**
+- Treat all phases as pure steps with explicit inputs/outputs (makes retries safe).
+
+### 2) Context & Memory Store
+
+A simple, auditable structure is best:
+
+- **Cycle snapshots:** code + config + metrics + analysis
+- **Aggregated metrics:** rolling timeline for quick comparisons
+- **Experience log:** "this change helped/hurt" records
+
+### 3) Training Executor
+
+Pluggable runner:
+
+- **Local:** Python subprocess
+- **Containerized:** Docker
+- **Cluster:** Kubernetes/Slurm
+- **Cloud:** Managed jobs
+
+**Must support:**
+- Timeouts
+- Log streaming
+- Artifact collection
+- Deterministic working directory per run
+
+### 4) Agents
+
+Two roles (can be the same model, but separate prompts/tools):
+
+- **Code agent:** Writes patches and ensures runnable training.
+- **Analysis agent:** Reads outputs and proposes next steps.
+
+### 5) Monitoring Dashboard
+
+**Minimum viable:**
+- CLI table + live logs + phase status
+- Metrics chart across cycles
+- Resource usage + budgets remaining
+
+---
+
+## Data Model (Artifacts Per Cycle)
+
+### Recommended Directory Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           INITIAL SETUP                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│  User Input → Config File → Orchestrator initialization               │
-│                  ↓                                                      │
-│              Project Target (e.g., "CIFAR-10 classifier, 92% accuracy") │
-└─────────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           CYCLE EXECUTION                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ╔═════════════════════════════════════════════════════════════════╗   │
-│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
-│  ║  │  PHASE 1: OpenCode Agent                                 │ ║   │
-│  ║  │  "Create initial model code for CIFAR-10 classification"│ ║   │
-│  ║  │  Input: Context + Previous Analysis + Target            │ ║   │
-│  ║  │  Output: model.py, train.py, config.json, data.py       │ ║   │
-│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
-│  ║                              │                                  ║   │
-│  ║                              ▼                                  ║   │
-│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
-│  ║  │  PHASE 2: Training Execution                            │ ║   │
-│  ║  │  python train.py --config config.json                   │ ║   │
-│  ║  │  Input: Code from Phase 1 + Training Data               │ ║   │
-│  ║  │  Output: model.pth, logs/, metrics.json                 │ ║   │
-│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
-│  ║                              │                                  ║   │
-│  ║                              ▼                                  ║   │
-│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
-│  ║  │  PHASE 3: OpenCode Analysis Agent                        │ ║   │
-│  ║  │  "Analyze training logs and suggest improvements"       │ ║   │
-│  ║  │  Input: Logs + Metrics + Current Code + Target          │ ║   │
-│  ║  │  Output: analysis.md + recommendations.json + Decision  │ ║   │
-│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
-│  ║                              │                                  ║   │
-│  ║                              ▼                                  ║   │
-│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
-│  ║  │  DECISION POINT                                         │ ║   │
-│  ║  │  ┌─────────────────────────────────────────────────┐    │ ║   │
-│  ║  │  │ CONTINUE?                                      │    │ ║   │
-│  ║  │  │ • Target not met (0.784 < 0.92)                │    │ ║   │
-│  ║  │  │ • Clear improvement path identified           │    │ ║   │
-│  ║  │  │ • Within safeguards (Cycle 2 < 10)             │    │ ║   │
-│  ║  │  └────────────────────┬────────────────────────────┘    │ ║   │
-│  ║  │                     ▼                                  │ ║   │
-│  ║  │              [YES → Next Cycle]                        │ ║   │
-│  ║  │  ┌─────────────────────────────────────────────────┐    │ ║   │
-│  ║  │  │ STOP?                                          │    │ ║   │
-│  ║  │  │ • Target met (0.924 ≥ 0.92)                    │    │ ║   │
-│  ║  │  │ • Max cycles reached (Cycle 11 = 10)          │    │ ║   │
-│  ║  │  │ • No improvement for 3 cycles                  │    │ ║   │
-│  ║  │  └────────────────────┬────────────────────────────┘    │ ║   │
-│  ║  │                     ▼                                  │ ║   │
-│  ║  │              [YES → Final Report]                      │ ║   │
-│  ║  └──────────────────────────────────────────────────────────┘ ║   │
-│  ║                                                              ║   │
-│  ╚═════════════════════════════════════════════════════════════════╝   │
-│                                   │                                      │
-│                                   ▼                                      │
-└─────────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         FINAL OUTPUT                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  • Trained model (best checkpoint)                                      │
-│  • Training history (all metrics over cycles)                          │
-│  • Final report (what worked, what didn't)                              │
-│  • Best configuration                                                  │
-│  • Codebase (final version)                                            │
-└─────────────────────────────────────────────────────────────────────────┘
+runs/
+  cycle_0001/
+    code_snapshot/      # optional (or git commit)
+    config.json
+    logs/
+    checkpoints/
+    metrics.json
+    analysis.md
+    recommendations.json
+    decision.json
+  cycle_0002/
+    ...
+reports/
+  final_report.md
+  leaderboard.json     # best checkpoints/configs across cycles
+state/
+  ralph_state.json     # orchestrator state (resumable)
+```
+
+### `metrics.json` (Minimal Contract)
+
+```json
+{
+  "cycle": 1,
+  "target": {
+    "name": "test_accuracy",
+    "value": 0.92
+  },
+  "result": {
+    "test_accuracy": 0.784,
+    "val_accuracy": 0.792,
+    "train_loss": 1.23
+  },
+  "runtime": {
+    "train_seconds": 812,
+    "eval_seconds": 44
+  },
+  "resources": {
+    "gpu": "A10",
+    "vram_gb": 24,
+    "peak_mem_gb": 11.2
+  }
+}
 ```
 
 ---
 
-### Data Flow Between Components
+## Safeguards (Non-Negotiable)
 
-```
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   PHASE 1   │─────▶│   PHASE 2   │─────▶│   PHASE 3   │─────▶│  DECISION   │
-│  OpenCode   │      │  Training   │      │  OpenCode   │      │   ENGINE    │
-│             │      │             │      │             │      │             │
-│ OUTPUT:     │      │ OUTPUT:     │      │ OUTPUT:     │      │ OUTPUT:     │
-│ - Code      │      │ - Model     │      │ - Analysis  │      │ - Continue  │
-│ - Config    │      │ - Logs      │      │ - Recs      │      │ - Stop      │
-└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
-      │                   │                   │                   │
-      │                   │                   │                   │
-      └───────────────────┼───────────────────┼───────────────────┘
-                          │                   │
-                          ▼                   ▼
-              ┌──────────────────────────────────────────┐
-              │     SHARED CONTEXT & MEMORY             │
-              │     ──────────────────────────────       │
-              │  • Code history (v1, v2, v3...)         │
-              │  • Config history                       │
-              │  • Metrics timeline                     │
-              │  • Recommendations history              │
-              │  • What improvements helped/hurt         │
-              └──────────────────────────────────────────┘
-                          │
-                          │ feeds back to next cycle
-                          ▼
-                    ┌──────────┐
-                    │ PHASE 1  │  (next iteration)
-                    │ (Cycle   │
-                    │  N+1)    │
-                    └──────────┘
-```
+| Safeguard | What it prevents | Typical default |
+|-----------|------------------|------------------|
+| **Max cycles** | Infinite loops | 10 |
+| **No-improvement stop** | Plateauing waste | 3 cycles |
+| **Time limit per cycle** | Runaway jobs | 30 min |
+| **Budget per cycle** | Overspending tokens/compute | Configurable |
+| **Minimum validation gate** | Training garbage configs | Configurable |
+| **Manual stop/pause** | Human override | Always on |
 
-### Phase Breakdown
+**No-Improvement rule (example):**
+Stop if the target metric fails to improve by at least `min_delta` for `N` consecutive cycles.
 
-#### Phase 1: Code Generation (OpenCode Agent)
-**Goal:** Create/modify project structure and training code
+---
 
-**Tasks:**
-- Initialize ML project (PyTorch/TensorFlow, etc.)
-- Set up model architecture
-- Configure training hyperparameters
-- Implement data loading pipeline
-- Add logging and checkpointing
-- Write training scripts
+## Decision Logic (Example)
 
-**Inputs:**
-- Model type/goal (e.g., "image classifier for CIFAR-10")
-- Previous cycle's analysis (if not initial)
-- Target metrics to achieve
+A simple, explicit policy is easier to debug:
 
-**Outputs:**
-- Complete codebase ready to train
-- Training configuration file
-- Requirements/dependencies
+1. **Stop immediately if:**
+   - Target met
+   - Max cycles reached
+   - Budgets exceeded
 
-#### Phase 2: Training & Validation
-**Goal:** Execute training and validate results
+2. **Else stop if:**
+   - Plateau rule triggered (no improvement for `N`)
 
-**Tasks:**
-- Install dependencies
-- Run training command
-- Monitor training (loss, accuracy, etc.)
-- Validate on test set
-- Generate metrics report
-- Save model checkpoints
+3. **Else continue if:**
+   - Recommendations include at least one "high confidence" change
+   - Validation gate is satisfied
 
-**Inputs:**
-- Code from Phase 1
-- Training data
-- Training config
+---
 
-**Outputs:**
-- Trained model
-- Training logs (TensorBoard/MLFlow)
-- Validation metrics
-- Performance summary
+## Configuration File
 
-#### Phase 3: Analysis & Improvement (OpenCode Agent)
-**Goal:** Analyze results and recommend improvements
-
-**Tasks:**
-- Review training logs and metrics
-- Identify bottlenecks/underperformance
-- Recommend architecture changes
-- Suggest hyperparameter tuning
-- Propose data augmentation strategies
-- Analyze failure cases
-- Compare to target metrics
-
-**Inputs:**
-- Training logs
-- Validation metrics
-- Current model checkpoint
-- Target metrics
-- Cycle number
-
-**Outputs:**
-- Analysis report
-- Specific improvement recommendations
-- Next cycle's focus areas
-- Decision (continue/stop)
-
-### Key Components
-
-#### 1. Orchestrator (Main Controller)
-- Manages the cycle state
-- Coordinates between agents
-- Enforces safeguards (max cycles, time limits, token budgets)
-- Stores and retrieves context from previous cycles
-- Makes continue/stop decisions
-
-#### 2. Context Management
-- **Cycle History:** Store each cycle's code, config, results
-- **Progress Tracking:** Track metric improvements over time
-- **Knowledge Base:** Learn what worked vs. what didn't
-- **Configuration:** Store project-specific settings
-
-#### 3. Decision Engine
-- **Stop Conditions:**
-  - Target metrics achieved
-  - Max cycles reached (e.g., 10)
-  - No improvement for N cycles (e.g., 3)
-  - Time/ budget exceeded
-  - Manual stop requested
-- **Continue Logic:**
-  - Metrics still improving
-  - Clear improvement opportunities identified
-  - Within resource limits
-
-#### 4. Monitoring Dashboard
-- Real-time cycle status
-- Current phase and progress
-- Metrics over time (visualizations)
-- Agent activity log
-- Resource usage (tokens, time, compute)
-
-### Safeguards (Critical!)
-
-| Safeguard | Description | Default |
-|-----------|-------------|---------|
-| **Max Cycles** | Prevent infinite loops | 10 cycles |
-| **Token Budget** | Limit API usage per cycle | 100k tokens |
-| **Time Limit** | Max time per cycle | 30 minutes |
-| **No-Improvement Stop** | Stop after N cycles without improvement | 3 cycles |
-| **Validation Threshold** | Minimum validation score to continue | Configurable |
-| **Manual Override** | Always allow manual stop/pause | Yes |
-
-### Data Flow (Iterative Process)
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                         CYCLE 1                                     │
-├────────────────────────────────────────────────────────────────────┤
-│  [Phase 1] OpenCode: "Create initial CIFAR-10 classifier"           │
-│             ↓                                                       │
-│      Codebase v1 (CNN, 10 epochs, lr=0.001)                         │
-│             ↓                                                       │
-│  [Phase 2] Training: python train.py                                │
-│             ↓                                                       │
-│      Model v1 + Accuracy: 78.4% + Training logs                      │
-│             ↓                                                       │
-│  [Phase 3] Analysis: "Underfitting detected"                        │
-│             ↓                                                       │
-│      Recommendations: Add BatchNorm, increase epochs to 20          │
-│             ↓                                                       │
-│  [Decision] Target: 92% | Current: 78.4% → CONTINUE                  │
-└────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                         CYCLE 2                                     │
-├────────────────────────────────────────────────────────────────────┤
-│  [Phase 1] OpenCode: "Apply: BatchNorm, epochs=20"                  │
-│             ↓                                                       │
-│      Codebase v2 (v1 + BatchNorm, 20 epochs)                       │
-│             ↓                                                       │
-│  [Phase 2] Training: python train.py                                │
-│             ↓                                                       │
-│      Model v2 + Accuracy: 85.6% + Training logs                      │
-│             ↓                                                       │
-│  [Phase 3] Analysis: "Overfitting detected, slow convergence"       │
-│             ↓                                                       │
-│      Recommendations: Add dropout, try Adam optimizer                │
-│             ↓                                                       │
-│  [Decision] Target: 92% | Current: 85.6% → CONTINUE                  │
-└────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                         CYCLE 3                                     │
-├────────────────────────────────────────────────────────────────────┤
-│  [Phase 1] OpenCode: "Apply: dropout=0.3, optimizer=Adam"           │
-│             ↓                                                       │
-│      Codebase v3 (v2 + dropout, Adam)                               │
-│             ↓                                                       │
-│  [Phase 2] Training: python train.py                                │
-│             ↓                                                       │
-│      Model v3 + Accuracy: 91.2% + Training logs                      │
-│             ↓                                                       │
-│  [Phase 3] Analysis: "Almost there, slight underfitting"            │
-│             ↓                                                       │
-│      Recommendations: Increase model width, add data augmentation  │
-│             ↓                                                       │
-│  [Decision] Target: 92% | Current: 91.2% → CONTINUE                  │
-└────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                         CYCLE 4                                     │
-├────────────────────────────────────────────────────────────────────┤
-│  [Phase 1] OpenCode: "Apply: wider model, augmentation"             │
-│             ↓                                                       │
-│      Codebase v4 (v3 + 2x channels, rotation/flip augmentation)    │
-│             ↓                                                       │
-│  [Phase 2] Training: python train.py                                │
-│             ↓                                                       │
-│      Model v4 + Accuracy: 92.4% + Training logs                      │
-│             ↓                                                       │
-│  [Phase 3] Analysis: "Target achieved!"                             │
-│             ↓                                                       │
-│  [Decision] Target: 92% | Current: 92.4% → STOP ✓                   │
-└────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │    FINAL REPORT       │
-                    │    ────────────────    │
-                    │  • Best model: v4      │
-                    │  • Final accuracy: 92.4%│
-                    │  • Cycles: 4           │
-                    │  • Key improvements:    │
-                    │    - BatchNorm          │
-                    │    - Adam optimizer     │
-                    │    - Data augmentation  │
-                    │  • Codebase included    │
-                    └───────────────────────┘
-```
-
-### Configuration File (RALPH_ML_CONFIG.json)
+### `RALPH_ML_CONFIG.json` (Recommended)
 
 ```json
 {
   "project": {
     "name": "cifar10-classifier",
-    "type": "image-classification",
     "framework": "pytorch",
+    "task": "image-classification",
     "target_metric": {
       "name": "test_accuracy",
       "value": 0.92
     }
   },
+  "data": {
+    "root": "./data",
+    "train_split": "train",
+    "val_split": "val",
+    "test_split": "test"
+  },
   "safeguards": {
     "max_cycles": 10,
     "no_improvement_stop_cycles": 3,
-    "token_budget_per_cycle": 100000,
-    "time_limit_per_cycle_minutes": 30
+    "min_improvement_delta": 0.002,
+    "time_limit_per_cycle_minutes": 30,
+    "token_budget_per_cycle": 100000
+  },
+  "execution": {
+    "mode": "local",
+    "python": "python",
+    "train_cmd": "python train.py --config config.json",
+    "eval_cmd": "python eval.py --config config.json",
+    "env_capture": true
   },
   "agents": {
-    "opencode_model": "zai/glm-4.7",
-    "analysis_model": "zai/glm-4.7",
+    "code_model": "opencode",
+    "analysis_model": "opencode",
     "thinking": "medium"
   },
   "paths": {
-    "codebase": "./model-code",
-    "data": "./data",
-    "logs": "./logs",
-    "checkpoints": "./checkpoints",
-    "history": "./history"
+    "workspace": "./workspace",
+    "runs": "./runs",
+    "reports": "./reports",
+    "state": "./state"
+  },
+  "observability": {
+    "logger": "tensorboard",
+    "save_stdout": true,
+    "emit_events_jsonl": true
   }
 }
 ```
 
-### Implementation Phases
+---
 
-#### MVP (Minimum Viable Project)
-1. Basic orchestrator script
-2. Phase 1: OpenCode integration for initial setup
-3. Phase 2: Simple training execution
-4. Phase 3: OpenCode analysis
-5. Cycle counter and max-cycle safeguard
-
-#### V1.0
-1. Context persistence between cycles
-2. Metrics tracking and visualization
-3. Decision engine with multiple stop conditions
-4. Monitoring dashboard (CLI-based)
-5. Detailed logging
-
-#### V2.0
-1. Support for multiple model types (NLP, CV, RL)
-2. Integration with MLFlow/Weights & Biases
-3. Parallel experimentation (multiple architectures)
-4. Knowledge base of what works
-5. Resume from interrupted cycles
-
-### Technology Stack
-
-- **Orchestrator:** Python (asyncio for concurrent operations)
-- **Code Generation:** OpenCode CLI integration
-- **Training:** PyTorch / TensorFlow (flexible)
-- **Logging:** Weights & Biases or MLFlow
-- **Config:** JSON/TOML
-- **CLI:** Rich / typer for interface
-
-### Success Criteria
-
-- 🎯 Successfully train and improve a model over multiple cycles
-- 🛡️ Never exceed configured safeguards
-- 📊 Provide clear visibility into each cycle's progress
-- 🔄 Automatically stop when target is met
-- 💾 Persist and learn from previous cycles
-- 🖥️ Easy-to-use CLI interface
-
-### Example Workflow
+## CLI Contract (Suggested)
 
 ```
-$ ralph-ml-loop start --config cifar10-classifier.json
-
-[CYCLE 1 STARTED]
-└─ Phase 1: OpenCode creating initial codebase... ✓
-└─ Phase 2: Training for 10 epochs... ✓
-   Final accuracy: 0.784
-└─ Phase 3: Analyzing results...
-   → Recommendations: Add batch normalization, increase epochs
-[CYCLE 1 COMPLETE]
-
-[CYCLE 2 STARTED]
-└─ Phase 1: OpenCode applying improvements... ✓
-   → Added BatchNorm, epochs: 10 → 20
-└─ Phase 2: Training for 20 epochs... ✓
-   Final accuracy: 0.856
-└─ Phase 3: Analyzing results...
-   → Recommendations: Add dropout, try different optimizer
-[CYCLE 2 COMPLETE]
-
-...
-
-[TARGET MET!] Test accuracy: 0.924 (target: 0.92)
-Finalizing... Report saved to: ./reports/final-report.md
+ralph-ml init --config <file>
+ralph-ml start --config <file>
+ralph-ml resume --state ./state/ralph_state.json
+ralph-ml status
+ralph-ml report --run ./runs --out ./reports/final_report.md
 ```
+
+**Exit codes:**
+- `0`: target met / clean stop
+- `2`: stopped by safeguards
+- `3`: stopped due to plateau
+- `4`: unrecoverable error
 
 ---
 
-**Next Steps:**
-1. Choose initial ML project to test on
-2. Build orchestrator skeleton
-3. Integrate OpenCode for Phase 1
-4. Add training execution (Phase 2)
-5. Build analysis agent (Phase 3)
-6. Add safeguards and decision engine
-7. Create monitoring dashboard
-8. Test end-to-end!
+## Roadmap
 
-This is going to be awesome. A Ralph Loop that actually *learns* to learn better. 🚀
+### MVP
+- Orchestrator state machine
+- Local executor (subprocess)
+- Basic metrics contract + per-cycle folders
+- Simple stop conditions
+- CLI status output
+
+### v1.0
+- Resumable runs (state file)
+- Better comparison + leaderboard
+- Diff-based code snapshots (git integration)
+- Dashboard (TUI via `rich`)
+
+### v2.0
+- Multi-task templates (NLP/CV/RL)
+- Parallel experiments (branching cycles)
+- MLFlow/W&B integration
+- Knowledge base: pattern library of successful interventions
+
+---
+
+## Implementation Notes (Practical)
+
+- **Keep the orchestrator "boring":** Deterministic, testable, minimal magic.
+- **Treat agents as untrusted:** Validate outputs, lint, run unit checks.
+- **Make every artifact addressable** by `(cycle_id, run_id)` for traceability.
+- **Prefer patches over full rewrites** after cycle 1 to reduce churn.
