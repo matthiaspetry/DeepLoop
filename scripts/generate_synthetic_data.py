@@ -6,6 +6,7 @@ from pathlib import Path
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 
 def generate_synthetic_dataset(
@@ -26,12 +27,17 @@ def generate_synthetic_dataset(
         test_size: Fraction of data for test set
         val_size: Fraction of training data for validation set
     """
+    output_dir = Path(output_dir)
+
     print(f"Generating synthetic dataset...")
     print(f"  Samples: {n_samples}")
     print(f"  Features: {n_features}")
     print(f"  Classes: {n_classes}")
 
+    steps = tqdm(total=5, desc="Pipeline", unit="step")
+
     # Generate dataset
+    steps.set_postfix_str("Generating data")
     X, y = make_classification(
         n_samples=n_samples,
         n_features=n_features,
@@ -41,8 +47,10 @@ def generate_synthetic_dataset(
         n_clusters_per_class=1,
         random_state=42,
     )
+    steps.update(1)
 
     # Split into train/val/test
+    steps.set_postfix_str("Splitting data")
     # First split: train + val vs test
     X_train_val, X_test, y_train_val, y_test = train_test_split(
         X, y, test_size=test_size, random_state=42, stratify=y
@@ -56,14 +64,18 @@ def generate_synthetic_dataset(
         random_state=42,
         stratify=y_train_val,
     )
+    steps.update(1)
 
     # Standardize features
+    steps.set_postfix_str("Scaling features")
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
+    steps.update(1)
 
     # Save splits
+    steps.set_postfix_str("Saving splits")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     splits = {
@@ -72,7 +84,7 @@ def generate_synthetic_dataset(
         "test": {"X": X_test, "y": y_test},
     }
 
-    for split_name, data in splits.items():
+    for split_name, data in tqdm(splits.items(), desc="Saving splits", unit="split"):
         split_dir = output_dir / split_name
         split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -85,13 +97,14 @@ def generate_synthetic_dataset(
             "n_samples": len(data["y"]),
             "n_features": data["X"].shape[1],
             "n_classes": len(np.unique(data["y"])),
-            "shape": data["X"].shape,
+            "shape": list(data["X"].shape),
         }
         (split_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
 
-        print(f"  {split_name}: {metadata['n_samples']} samples")
+    steps.update(1)
 
     # Save dataset metadata
+    steps.set_postfix_str("Saving metadata")
     dataset_metadata = {
         "type": "synthetic_classification",
         "n_samples": n_samples,
@@ -109,14 +122,16 @@ def generate_synthetic_dataset(
     (output_dir / "dataset_metadata.json").write_text(
         json.dumps(dataset_metadata, indent=2)
     )
+    steps.update(1)
+    steps.close()
 
     print(f"\n✅ Dataset saved to: {output_dir}")
-    print(f"\nMetadata:")
-    for key, value in dataset_metadata.items():
-        print(f"  {key}: {value}")
+    print(f"\nSplits:")
+    for name, count in dataset_metadata["splits"].items():
+        print(f"  {name}: {count} samples")
 
 
 if __name__ == "__main__":
     # Generate dataset in data directory
-    data_dir = Path("/root/.openclaw/workspace/ralph-ml-loop/data")
+    data_dir = Path(__file__).resolve().parent.parent / "data"
     generate_synthetic_dataset(data_dir)

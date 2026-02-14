@@ -1,7 +1,7 @@
 """Configuration and data models for Ralph ML Loop."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,50 @@ class TargetMetric(BaseModel):
 
     name: str = Field(..., description="Metric name (e.g., test_accuracy)")
     value: float = Field(..., description="Target value to achieve")
+    direction: Optional[Literal["maximize", "minimize"]] = Field(
+        default=None,
+        description="Optimization direction. If omitted, inferred from metric name.",
+    )
+
+    def get_direction(self) -> Literal["maximize", "minimize"]:
+        """Get optimization direction, inferred from metric name when not set."""
+        if self.direction is not None:
+            return self.direction
+
+        lowered = self.name.lower()
+        minimize_keywords = (
+            "loss",
+            "error",
+            "cer",
+            "wer",
+            "rmse",
+            "mae",
+            "mse",
+            "distance",
+            "latency",
+        )
+        if any(keyword in lowered for keyword in minimize_keywords):
+            return "minimize"
+        return "maximize"
+
+    def target_is_met(self, current_value: float) -> bool:
+        """Check if target is met for the metric direction."""
+        if self.get_direction() == "minimize":
+            return current_value <= self.value
+        return current_value >= self.value
+
+    def is_better(self, candidate: float, incumbent: Optional[float]) -> bool:
+        """Check if candidate value is better than incumbent."""
+        if incumbent is None:
+            return True
+
+        if self.get_direction() == "minimize":
+            return candidate < incumbent
+        return candidate > incumbent
+
+    def comparator_symbol(self) -> str:
+        """Human-readable target comparator for logs."""
+        return "<=" if self.get_direction() == "minimize" else ">="
 
 
 class ProjectConfig(BaseModel):
@@ -41,12 +85,8 @@ class SafeguardsConfig(BaseModel):
     min_improvement_delta: float = Field(
         default=0.002, description="Minimum improvement delta to count as progress"
     )
-    time_limit_per_cycle_minutes: int = Field(
-        default=30, description="Time limit per cycle"
-    )
-    token_budget_per_cycle: int = Field(
-        default=100000, description="Token budget per cycle"
-    )
+    time_limit_per_cycle_minutes: int = Field(default=30, description="Time limit per cycle")
+    token_budget_per_cycle: int = Field(default=100000, description="Token budget per cycle")
 
 
 class ExecutionConfig(BaseModel):
@@ -54,8 +94,12 @@ class ExecutionConfig(BaseModel):
 
     mode: str = Field(default="local", description="Execution mode (local/container/cloud)")
     python: str = Field(default="python", description="Python interpreter")
-    train_cmd: str = Field(default="python train.py --config config.json", description="Training command")
-    eval_cmd: str = Field(default="python eval.py --config config.json", description="Evaluation command")
+    train_cmd: str = Field(
+        default="python train.py --config config.json", description="Training command"
+    )
+    eval_cmd: str = Field(
+        default="python eval.py --config config.json", description="Evaluation command"
+    )
     env_capture: bool = Field(default=True, description="Capture environment info")
 
 
@@ -90,10 +134,14 @@ class RalphMLConfig(BaseModel):
     project: ProjectConfig = Field(..., description="Project configuration")
     data: DataConfig = Field(default_factory=DataConfig, description="Data configuration")
     safeguards: SafeguardsConfig = Field(default_factory=SafeguardsConfig, description="Safeguards")
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig, description="Execution settings")
+    execution: ExecutionConfig = Field(
+        default_factory=ExecutionConfig, description="Execution settings"
+    )
     agents: AgentsConfig = Field(default_factory=AgentsConfig, description="Agent settings")
     paths: PathsConfig = Field(default_factory=PathsConfig, description="Path settings")
-    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig, description="Observability settings")
+    observability: ObservabilityConfig = Field(
+        default_factory=ObservabilityConfig, description="Observability settings"
+    )
 
     def get_paths(self) -> dict[str, Path]:
         """Get all paths as Path objects."""
@@ -120,6 +168,8 @@ class MetricsResult(BaseModel):
 
     class ResultMetrics(BaseModel):
         """Result metrics."""
+
+        model_config = {"extra": "allow"}
 
         test_accuracy: Optional[float] = None
         val_accuracy: Optional[float] = None
@@ -158,7 +208,9 @@ class CycleAnalysis(BaseModel):
     """Analysis result from a cycle."""
 
     summary: str = Field(..., description="Summary of analysis")
-    recommendations: list[Recommendation] = Field(default_factory=list, description="Recommendations")
+    recommendations: list[Recommendation] = Field(
+        default_factory=list, description="Recommendations"
+    )
 
     class Decision(BaseModel):
         """Decision to continue or stop."""
@@ -177,6 +229,9 @@ class CycleSnapshot(BaseModel):
     analysis: Optional[CycleAnalysis] = None
     timestamp: str
     git_commit: Optional[str] = None
+    architecture_log: Optional[dict[str, Any]] = None
+    best_model_artifact: Optional[str] = None
+    source_snapshot_dir: Optional[str] = None
 
 
 class RalphState(BaseModel):
@@ -184,7 +239,7 @@ class RalphState(BaseModel):
 
     config: RalphMLConfig
     current_cycle: int = Field(default=0, description="Current cycle number")
-    best_metric: float = Field(0.0, description="Best metric achieved so far")
+    best_metric: Optional[float] = Field(None, description="Best metric achieved so far")
     best_cycle: int = Field(0, description="Cycle number with best metric")
     history: list[CycleSnapshot] = Field(default_factory=list, description="Cycle history")
     status: str = Field(default="idle", description="Current status")
@@ -198,12 +253,18 @@ class RalphState(BaseModel):
 
         # Update best metric
         target_name = snapshot.metrics.target.name
-        if target_name in snapshot.metrics.result.model_dump():
-            current_value = snapshot.metrics.result.model_dump()[target_name]
-            if isinstance(current_value, (int, float)) and current_value > self.best_metric:
+        current_value = snapshot.metrics.result.model_dump().get(target_name)
+        if isinstance(current_value, (int, float)):
+            if snapshot.metrics.target.is_better(current_value, self.best_metric):
                 self.best_metric = current_value
                 self.best_cycle = snapshot.cycle_number
 
     def has_improved(self, previous_metric: float, min_delta: float) -> bool:
         """Check if there's improvement."""
+        if self.best_metric is None:
+            return False
+
+        target_metric = self.config.project.target_metric
+        if target_metric.get_direction() == "minimize":
+            return previous_metric - self.best_metric >= min_delta
         return self.best_metric - previous_metric >= min_delta
