@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Mock OpenCode for testing Ralph ML Loop."""
+"""Mock OpenCode for testing Ralph ML Loop - Simplified version."""
 
 import json
 import sys
 from pathlib import Path
 
-# Read prompt from stdin (how our orchestrator calls it)
+# Read prompt from stdin
 if sys.stdin.isatty():
     print("Error: This script reads from stdin", file=sys.stderr)
     sys.exit(1)
 
 prompt = sys.stdin.read()
-
-print(f"Mock OpenCode received prompt:", file=sys.stderr)
-print(f"Prompt length: {len(prompt)} chars", file=sys.stderr)
 
 # Extract cycle number from context
 cycle_number = 1
@@ -32,84 +29,80 @@ elif "Previous cycle (5)" in prompt or "previous cycle (5)" in prompt:
 
 print(f"Detected cycle {cycle_number}", file=sys.stderr)
 
-# Determine if this is a code generation or analysis request
-if "Create or modify a training codebase" in prompt:
-    print(f"Code generation request detected for cycle {cycle_number}", file=sys.stderr)
+# Base accuracies for testing
+base_accuracies = {1: 0.75, 2: 0.82, 3: 0.88, 4: 0.93, 5: 0.96, 6: 0.98}
+target_accuracy = base_accuracies.get(cycle_number, 0.95)
 
-    # Create progressively better models
-    # Cycle 1: 0.75 (weak)
-    # Cycle 2: 0.82 (better)
-    # Cycle 3: 0.88 (good)
-    # Cycle 4: 0.93 (very good)
-    # Cycle 5: 0.96 (excellent)
+# Model architecture improves with cycles
+if cycle_number == 1:
+    hidden_dim = 32
+    layers = 1
+    use_bn = False
+    use_dropout = False
+elif cycle_number == 2:
+    hidden_dim = 64
+    layers = 2
+    use_bn = False
+    use_dropout = False
+elif cycle_number == 3:
+    hidden_dim = 128
+    layers = 2
+    use_bn = True
+    use_dropout = True
+elif cycle_number >= 4:
+    hidden_dim = 256
+    layers = 3
+    use_bn = True
+    use_dropout = True
+else:
+    hidden_dim = 128
+    layers = 2
+    use_bn = True
+    use_dropout = True
 
-    base_accuracies = {1: 0.75, 2: 0.82, 3: 0.88, 4: 0.93, 5: 0.96, 6: 0.98}
-    target_accuracy = base_accuracies.get(cycle_number, 0.95)
+workspace = Path("/root/.openclaw/workspace/ralph-ml-loop/workspace")
 
-    # No randomness - deterministic for testing
-    print(f"Target accuracy for cycle {cycle_number}: {target_accuracy:.3f}", file=sys.stderr)
-
-    # Create mock files in workspace
-    workspace = Path("/root/.openclaw/workspace/ralph-ml-loop/workspace")
-
-    # Model architecture improves with cycles
-    if cycle_number == 1:
-        hidden_dim = 32
-        layers = 1
-        use_bn = False
-        use_dropout = False
-    elif cycle_number == 2:
-        hidden_dim = 64
-        layers = 2
-        use_bn = False
-        use_dropout = False
-    elif cycle_number == 3:
-        hidden_dim = 128
-        layers = 2
-        use_bn = True
-        use_dropout = True
-    elif cycle_number >= 4:
-        hidden_dim = 256
-        layers = 3
-        use_bn = True
-        use_dropout = True
-    else:
-        hidden_dim = 128
-        layers = 2
-        use_bn = True
-        use_dropout = True
-
-    # Create model.py with progressive improvements (proper Python code)
-    bn_line = "        layers_list.append(nn.BatchNorm1d(hidden_dim))" if use_bn else ""
-    dropout_line = "        layers_list.append(nn.Dropout(0.3))" if use_dropout else ""
-
-    model_py = f'''import torch
+# Create model.py
+model_code = """import torch
 import torch.nn as nn
 
 class SimpleClassifier(nn.Module):
-    def __init__(self, input_dim=20, hidden_dim={hidden_dim}, num_classes=10):
+    def __init__(self, input_dim=20, hidden_dim={}, num_classes=10):
         super().__init__()
         layers_list = []
-        layers_list.append(nn.Linear(input_dim, hidden_dim))
-{bn_line}
-        layers_list.append(nn.ReLU())
+        layers_list.append(nn.Linear(input_dim, hidden_dim))""".format(hidden_dim)
 
-        for i in range({layers-1}):
-            layers_list.append(nn.Linear(hidden_dim, hidden_dim))
-{bn_line}
-            layers_list.append(nn.ReLU())
-{dropout_line}
+if use_bn:
+    model_code += """
+        layers_list.append(nn.BatchNorm1d(hidden_dim))"""
 
+model_code += """
+        layers_list.append(nn.ReLU())"""
+
+for i in range(layers - 1):
+    model_code += """
+        layers_list.append(nn.Linear(hidden_dim, hidden_dim))"""
+    if use_bn:
+        model_code += """
+        layers_list.append(nn.BatchNorm1d(hidden_dim))"""
+    model_code += """
+        layers_list.append(nn.ReLU())"""
+    if use_dropout:
+        model_code += """
+        layers_list.append(nn.Dropout(0.3))"""
+
+model_code += """
         layers_list.append(nn.Linear(hidden_dim, num_classes))
         self.network = nn.Sequential(*layers_list)
 
     def forward(self, x):
         return self.network(x)
-'''
-    (workspace / "model.py").write_text(model_py)
+"""
 
-    # Create data.py
-    data_py = '''import numpy as np
+(workspace / "model.py").write_text(model_code)
+
+# Create data.py
+data_code = """import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
@@ -136,17 +129,17 @@ def get_dataloaders(data_dir, batch_size=32):
     test_loader = DataLoader(test_dataset, batch_size=batch_size)
 
     return train_loader, val_loader, test_loader
-'''
-    (workspace / "data.py").write_text(data_py)
+"""
 
-    # Create train.py
-    train_py = f'''import json
+(workspace / "data.py").write_text(data_code)
+
+# Create train.py
+train_code = """import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from model import SimpleClassifier
 from data import get_dataloaders
-import time
 
 def train():
     torch.manual_seed(42)
@@ -183,7 +176,7 @@ def train():
                 correct += (predicted == y_batch).sum().item()
 
         val_accuracy = correct / total
-        print(f"Epoch {{epoch+1}}/{{num_epochs}}, Loss: {{train_loss/len(train_loader):.4f}}, Val Acc: {{val_accuracy:.4f}}")
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {train_loss/len(train_loader):.4f}, Val Acc: {val_accuracy:.4f}")
 
     # Test
     model.eval()
@@ -196,38 +189,38 @@ def train():
             total += y_batch.size(0)
             correct += (predicted == y_batch).sum().item()
 
-    test_accuracy = {target_accuracy:.4f}
+    test_accuracy = """ + str(target_accuracy) + """
     print(f"Test Accuracy: {test_accuracy:.4f}")
 
     # Save metrics
-    metrics = {{
-        "cycle": {cycle_number},
-        "target": {{"name": "test_accuracy", "value": 0.96}},
-        "result": {{
+    metrics = {
+        "cycle": """ + str(cycle_number) + """,
+        "target": {"name": "test_accuracy", "value": 0.96},
+        "result": {
             "test_accuracy": test_accuracy,
             "val_accuracy": val_accuracy,
             "train_loss": train_loss/len(train_loader)
-        }},
-        "runtime": {{
+        },
+        "runtime": {
             "train_seconds": 30.0,
             "eval_seconds": 5.0
-        }}
-    }}
+        }
+    }
 
     with open("metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
     print("Training complete!")
-    print(f"Metrics saved: test_accuracy={{test_accuracy:.4f}}")
+    print(f"Metrics saved: test_accuracy={test_accuracy:.4f}")
 
 if __name__ == "__main__":
     train()
-'''
-    (workspace / "train.py").write_text(train_py)
+"""
 
-    # Create eval.py
-    eval_py = '''import json
-import torch
+(workspace / "train.py").write_text(train_code)
+
+# Create eval.py
+eval_code = """import torch
 from model import SimpleClassifier
 from data import get_dataloaders
 
@@ -256,37 +249,24 @@ def eval():
 
 if __name__ == "__main__":
     eval()
-'''
-    (workspace / "eval.py").write_text(eval_py)
+"""
 
-    # Create config.json
-    config = {
-        "model": "SimpleClassifier",
-        "input_dim": 20,
-        "hidden_dim": hidden_dim,
-        "num_classes": 10,
-        "epochs": 10,
-        "batch_size": 32,
-        "learning_rate": 0.001,
-        "data_dir": "/root/.openclaw/workspace/ralph-ml-loop/data"
-    }
-    (workspace / "config.json").write_text(json.dumps(config, indent=2))
+(workspace / "eval.py").write_text(eval_code)
 
-    # Create requirements.txt
-    requirements = '''torch>=2.0.0
-numpy>=1.24.0
-'''
-    (workspace / "requirements.txt").write_text(requirements)
+# Create config.json
+config = {
+    "model": "SimpleClassifier",
+    "input_dim": 20,
+    "hidden_dim": hidden_dim,
+    "num_classes": 10,
+    "epochs": 10,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "data_dir": "/root/.openclaw/workspace/ralph-ml-loop/data"
+}
+(workspace / "config.json").write_text(json.dumps(config, indent=2))
 
-    print("Created model.py, train.py, eval.py, data.py, config.json, requirements.txt", file=sys.stderr)
-
-elif "Analyze training results" in prompt:
-    print("Analysis request detected", file=sys.stderr)
-
-    # For now, just print a simple analysis
-    # In a real implementation, this would analyze metrics file
-    pass
-else:
-    print("Unknown request type", file=sys.stderr)
+# Create requirements.txt
+(workspace / "requirements.txt").write_text("torch>=2.0.0\nnumpy>=1.24.0\n")
 
 print("Mock OpenCode complete!")
