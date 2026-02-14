@@ -7,42 +7,202 @@ A Ralph Loop adapted specifically for deep learning model training — using AI 
 ### Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Ralph ML Loop Orchestrator                     │
-└─────────────────────────────────────────────────────────────────┘
+                    ┌─────────────────────────────────────────────────────┐
+                    │              RALPH ML LOOP ORCHESTRATOR              │
+                    │         (Coordinates all cycles & safeguards)       │
+                    └─────────────────────────────────────────────────────┘
+                                          │
+                                          │ cycle_start()
+                                          ▼
+
+        ╔═══════════════════════════════════════════════════════════════╗
+        ║                    CYCLE N (Repeat until target)              ║
+        ╠═══════════════════════════════════════════════════════════════╣
+        ║                                                               ║
+        ║  ┌──────────────────┐         ┌──────────────────┐            ║
+        ║  │   PHASE 1        │         │   PHASE 2        │            ║
+        ║  │   Code Gen       │────────▶│   Training       │────────▶   ║
+        ║  │   (OpenCode)     │         │   + Validation   │            ║
+        ║  └────────┬─────────┘         └────────┬─────────┘            ║
+        ║           │                            │                      ║
+        ║           │ Generates:                 │ Executes:            ║
+        ║           │ - Model code               │ - Training           ║
+        ║           │ - Config                   │ - Validation         ║
+        ║           │ - Data pipeline            │ - Logging            ║
+        ║           │                            │                      ║
+        ║           └───────────┬────────────────┘                      ║
+        ║                       │                                       ║
+        ║                       ▼                                       ║
+        ║              ┌──────────────────┐                            ║
+        ║              │   PHASE 3        │                            ║
+        ║              │   Analysis        │                            ║
+        ║              │   (OpenCode)      │                            ║
+        ║              └────────┬─────────┘                            ║
+        ║                       │                                       ║
+        ║                       │ Analyzes:                             ║
+        ║                       │ - Training logs                      ║
+        ║                       │ - Metrics                             ║
+        ║                       │ - Generates improvements              ║
+        ║                       │                                       ║
+        ║                       └───────────┬─────────────────────────┐   ║
+        ║                                   │                         │   ║
+        ║                    ┌──────────────▼─────────┐   ┌───────────▼───┐ ║
+        ║                    │   DECISION ENGINE     │   │   SAFEGUARDS   │ ║
+        ║                    │                      │   │                │ ║
+        ║                    │ ✓ Target met?        │   │ • Max cycles  │ ║
+        ║                    │ ✓ No improvement?    │   │ • Time limit   │ ║
+        ║                    │ ✓ Token budget ok?   │   │ • Token budget │ ║
+        ║                    └──────────┬───────────┘   └────────────────┘ ║
+        ║                               │                                   ║
+        ║                    ┌──────────┴──────────┐                        ║
+        ║                    │                     │                        ║
+        ║              Continue?                  Stop?                      ║
+        ║                    │                     │                        ║
+        ║                    ▼                     ▼                        ║
+        ║            ┌─────────────┐      ┌──────────────┐                  ║
+        ║            │ Next Cycle  │      │ Final Report │                  ║
+        ║            │ (N+1)       │      │              │                  ║
+        ║            └──────┬──────┘      └──────────────┘                  ║
+        ║                   │                                               ║
+        ║                   └───────┬───────────────────────────────────────║
+        ║                           │                                       ║
+        ║                           ▼                                       ║
+        ║              ┌──────────────────────────┐                        ║
+        ║              │  SHARED CONTEXT & MEMORY │                        ║
+        ║              │  ─────────────────────── │                        ║
+        ║              │  • Cycle history         │                        ║
+        ║              │  • Metrics over time     │                        ║
+        ║              │  • What worked/didn't     │                        ║
+        ║              │  • Best configurations   │                        ║
+        ║              └──────────────────────────┘                        ║
+        ╚═══════════════════════════════════════════════════════════════╝
+                                          │
+                                          ▼
+                            ┌───────────────────────┐
+                            │   MONITORING DASHBOARD │
+                            │   ───────────────────  │
+                            │   • Live cycle status   │
+                            │   • Real-time metrics   │
+                            │   • Resource usage      │
+                            │   • Agent activity log  │
+                            └───────────────────────┘
+```
+
+---
+
+### System Flow (Side View)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           INITIAL SETUP                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│  User Input → Config File → Orchestrator initialization               │
+│                  ↓                                                      │
+│              Project Target (e.g., "CIFAR-10 classifier, 92% accuracy") │
+└─────────────────────────────────────────────────────────────────────────┘
                                 │
-        ┌───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼
-┌───────────────┐       ┌───────────────┐       ┌───────────────┐
-│  Phase 1      │       │  Phase 2      │       │  Phase 3      │
-│  Code Gen     │       │  Training     │       │  Analysis     │
-│  (OpenCode)   │       │  + Validation │       │  (OpenCode)   │
-└───────────────┘       └───────────────┘       └───────────────┘
-        │                       │                       │
-        ▼                       ▼                       ▼
-   ┌─────────┐            ┌─────────┐            ┌─────────┐
-   │ Initial │            │ Model   │            │ Metrics │
-   │ Setup   │            │ Training│            │ + Logs  │
-   └─────────┘            └─────────┘            └─────────┘
-        │                       │                       │
-        └───────────────────────┼───────────────────────┘
                                 ▼
-                    ┌───────────────────────┐
-                    │  Decision Engine      │
-                    │  - Continue?          │
-                    │  - Stop (target met)  │
-                    │  - Stop (max cycles)  │
-                    └───────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           CYCLE EXECUTION                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ╔═════════════════════════════════════════════════════════════════╗   │
+│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
+│  ║  │  PHASE 1: OpenCode Agent                                 │ ║   │
+│  ║  │  "Create initial model code for CIFAR-10 classification"│ ║   │
+│  ║  │  Input: Context + Previous Analysis + Target            │ ║   │
+│  ║  │  Output: model.py, train.py, config.json, data.py       │ ║   │
+│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
+│  ║                              │                                  ║   │
+│  ║                              ▼                                  ║   │
+│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
+│  ║  │  PHASE 2: Training Execution                            │ ║   │
+│  ║  │  python train.py --config config.json                   │ ║   │
+│  ║  │  Input: Code from Phase 1 + Training Data               │ ║   │
+│  ║  │  Output: model.pth, logs/, metrics.json                 │ ║   │
+│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
+│  ║                              │                                  ║   │
+│  ║                              ▼                                  ║   │
+│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
+│  ║  │  PHASE 3: OpenCode Analysis Agent                        │ ║   │
+│  ║  │  "Analyze training logs and suggest improvements"       │ ║   │
+│  ║  │  Input: Logs + Metrics + Current Code + Target          │ ║   │
+│  ║  │  Output: analysis.md + recommendations.json + Decision  │ ║   │
+│  ║  └───────────────────────────┬──────────────────────────────┘ ║   │
+│  ║                              │                                  ║   │
+│  ║                              ▼                                  ║   │
+│  ║  ┌──────────────────────────────────────────────────────────┐ ║   │
+│  ║  │  DECISION POINT                                         │ ║   │
+│  ║  │  ┌─────────────────────────────────────────────────┐    │ ║   │
+│  ║  │  │ CONTINUE?                                      │    │ ║   │
+│  ║  │  │ • Target not met (0.784 < 0.92)                │    │ ║   │
+│  ║  │  │ • Clear improvement path identified           │    │ ║   │
+│  ║  │  │ • Within safeguards (Cycle 2 < 10)             │    │ ║   │
+│  ║  │  └────────────────────┬────────────────────────────┘    │ ║   │
+│  ║  │                     ▼                                  │ ║   │
+│  ║  │              [YES → Next Cycle]                        │ ║   │
+│  ║  │  ┌─────────────────────────────────────────────────┐    │ ║   │
+│  ║  │  │ STOP?                                          │    │ ║   │
+│  ║  │  │ • Target met (0.924 ≥ 0.92)                    │    │ ║   │
+│  ║  │  │ • Max cycles reached (Cycle 11 = 10)          │    │ ║   │
+│  ║  │  │ • No improvement for 3 cycles                  │    │ ║   │
+│  ║  │  └────────────────────┬────────────────────────────┘    │ ║   │
+│  ║  │                     ▼                                  │ ║   │
+│  ║  │              [YES → Final Report]                      │ ║   │
+│  ║  └──────────────────────────────────────────────────────────┘ ║   │
+│  ║                                                              ║   │
+│  ╚═════════════════════════════════════════════════════════════════╝   │
+│                                   │                                      │
+│                                   ▼                                      │
+└─────────────────────────────────────────────────────────────────────────┘
                                 │
-                    ┌───────────┴───────────┐
-                    │                       │
-                Continue                Stop
-                    │                       │
-                    ▼                       ▼
-              ┌─────────┐            ┌─────────┐
-              │ Next    │            │ Report  │
-              │ Cycle   │            │ Summary │
-              └─────────┘            └─────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         FINAL OUTPUT                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Trained model (best checkpoint)                                      │
+│  • Training history (all metrics over cycles)                          │
+│  • Final report (what worked, what didn't)                              │
+│  • Best configuration                                                  │
+│  • Codebase (final version)                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Data Flow Between Components
+
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   PHASE 1   │─────▶│   PHASE 2   │─────▶│   PHASE 3   │─────▶│  DECISION   │
+│  OpenCode   │      │  Training   │      │  OpenCode   │      │   ENGINE    │
+│             │      │             │      │             │      │             │
+│ OUTPUT:     │      │ OUTPUT:     │      │ OUTPUT:     │      │ OUTPUT:     │
+│ - Code      │      │ - Model     │      │ - Analysis  │      │ - Continue  │
+│ - Config    │      │ - Logs      │      │ - Recs      │      │ - Stop      │
+└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
+      │                   │                   │                   │
+      │                   │                   │                   │
+      └───────────────────┼───────────────────┼───────────────────┘
+                          │                   │
+                          ▼                   ▼
+              ┌──────────────────────────────────────────┐
+              │     SHARED CONTEXT & MEMORY             │
+              │     ──────────────────────────────       │
+              │  • Code history (v1, v2, v3...)         │
+              │  • Config history                       │
+              │  • Metrics timeline                     │
+              │  • Recommendations history              │
+              │  • What improvements helped/hurt         │
+              └──────────────────────────────────────────┘
+                          │
+                          │ feeds back to next cycle
+                          ▼
+                    ┌──────────┐
+                    │ PHASE 1  │  (next iteration)
+                    │ (Cycle   │
+                    │  N+1)    │
+                    └──────────┘
 ```
 
 ### Phase Breakdown
@@ -160,32 +320,95 @@ A Ralph Loop adapted specifically for deep learning model training — using AI 
 | **Validation Threshold** | Minimum validation score to continue | Configurable |
 | **Manual Override** | Always allow manual stop/pause | Yes |
 
-### Data Flow
+### Data Flow (Iterative Process)
 
 ```
-Initial Request
-    ↓
-[Phase 1: OpenCode] → Codebase v1
-    ↓
-[Phase 2: Training] → Metrics v1
-    ↓
-[Phase 3: Analysis] → "Increase learning rate, add dropout"
-    ↓
-    ├─ Decision: Continue
-    ↓
-[Phase 1: OpenCode] → Codebase v2 (with changes)
-    ↓
-[Phase 2: Training] → Metrics v2
-    ↓
-[Phase 3: Analysis] → "Add data augmentation, reduce layers"
-    ↓
-    ├─ Decision: Continue
-    ↓
-...
-    ↓
-    ├─ Decision: Stop (target met)
-    ↓
-Final Report
+┌────────────────────────────────────────────────────────────────────┐
+│                         CYCLE 1                                     │
+├────────────────────────────────────────────────────────────────────┤
+│  [Phase 1] OpenCode: "Create initial CIFAR-10 classifier"           │
+│             ↓                                                       │
+│      Codebase v1 (CNN, 10 epochs, lr=0.001)                         │
+│             ↓                                                       │
+│  [Phase 2] Training: python train.py                                │
+│             ↓                                                       │
+│      Model v1 + Accuracy: 78.4% + Training logs                      │
+│             ↓                                                       │
+│  [Phase 3] Analysis: "Underfitting detected"                        │
+│             ↓                                                       │
+│      Recommendations: Add BatchNorm, increase epochs to 20          │
+│             ↓                                                       │
+│  [Decision] Target: 92% | Current: 78.4% → CONTINUE                  │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                         CYCLE 2                                     │
+├────────────────────────────────────────────────────────────────────┤
+│  [Phase 1] OpenCode: "Apply: BatchNorm, epochs=20"                  │
+│             ↓                                                       │
+│      Codebase v2 (v1 + BatchNorm, 20 epochs)                       │
+│             ↓                                                       │
+│  [Phase 2] Training: python train.py                                │
+│             ↓                                                       │
+│      Model v2 + Accuracy: 85.6% + Training logs                      │
+│             ↓                                                       │
+│  [Phase 3] Analysis: "Overfitting detected, slow convergence"       │
+│             ↓                                                       │
+│      Recommendations: Add dropout, try Adam optimizer                │
+│             ↓                                                       │
+│  [Decision] Target: 92% | Current: 85.6% → CONTINUE                  │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                         CYCLE 3                                     │
+├────────────────────────────────────────────────────────────────────┤
+│  [Phase 1] OpenCode: "Apply: dropout=0.3, optimizer=Adam"           │
+│             ↓                                                       │
+│      Codebase v3 (v2 + dropout, Adam)                               │
+│             ↓                                                       │
+│  [Phase 2] Training: python train.py                                │
+│             ↓                                                       │
+│      Model v3 + Accuracy: 91.2% + Training logs                      │
+│             ↓                                                       │
+│  [Phase 3] Analysis: "Almost there, slight underfitting"            │
+│             ↓                                                       │
+│      Recommendations: Increase model width, add data augmentation  │
+│             ↓                                                       │
+│  [Decision] Target: 92% | Current: 91.2% → CONTINUE                  │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                         CYCLE 4                                     │
+├────────────────────────────────────────────────────────────────────┤
+│  [Phase 1] OpenCode: "Apply: wider model, augmentation"             │
+│             ↓                                                       │
+│      Codebase v4 (v3 + 2x channels, rotation/flip augmentation)    │
+│             ↓                                                       │
+│  [Phase 2] Training: python train.py                                │
+│             ↓                                                       │
+│      Model v4 + Accuracy: 92.4% + Training logs                      │
+│             ↓                                                       │
+│  [Phase 3] Analysis: "Target achieved!"                             │
+│             ↓                                                       │
+│  [Decision] Target: 92% | Current: 92.4% → STOP ✓                   │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+                    ┌───────────────────────┐
+                    │    FINAL REPORT       │
+                    │    ────────────────    │
+                    │  • Best model: v4      │
+                    │  • Final accuracy: 92.4%│
+                    │  • Cycles: 4           │
+                    │  • Key improvements:    │
+                    │    - BatchNorm          │
+                    │    - Adam optimizer     │
+                    │    - Data augmentation  │
+                    │  • Codebase included    │
+                    └───────────────────────┘
 ```
 
 ### Configuration File (RALPH_ML_CONFIG.json)
