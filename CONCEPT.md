@@ -19,36 +19,68 @@ and 4) applies targeted improvements until a stopping condition is met.
 
 ## High-Level Architecture
 
-```mermaid
-graph TB
-    U[User config + target] --> O[Orchestrator]
+```
+                        ┌─────────────────────────────────────┐
+                        │      User config + target           │
+                        └──────────────────┬──────────────────┘
+                                           │
+                                           ▼
+                        ┌─────────────────────────────────────┐
+                        │           Orchestrator               │
+                        │  (State machine + safeguard enforcement)│
+                        └──────────────────┬──────────────────┘
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    │                      │                      │
+                    ▼                      ▼                      ▼
+        ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
+        │     Phase 1         │  │     Phase 2         │  │     Phase 3         │
+        │  Code Generation    │  │  Train + Validate   │  │  Analysis + Recs    │
+        │     (Agent)         │─▶│     (Executor)      │─▶│      (Agent)        │
+        └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘
+                   │                        │                        │
+                   │                        │                        │
+                   └────────────────────────┼────────────────────────┘
+                                            │
+                                            ▼
+                                  ┌─────────────────────┐
+                                  │   Decision Engine   │
+                                  │  ─────────────────   │
+                                  │  • Target met?      │
+                                  │  • Safeguards ok?   │
+                                  │  • Continue?        │
+                                  └──────────┬──────────┘
+                                             │
+                          ┌──────────────────┴──────────────────┐
+                          │                                     │
+                     Continue                                 Stop
+                          │                                     │
+                          ▼                                     ▼
+              ┌─────────────────────┐               ┌─────────────────────┐
+              │   Next Cycle (N+1)  │               │  Final Report +     │
+              └─────────────────────┘               │  Best Artifacts     │
+                                                   └─────────────────────┘
 
-    subgraph Cycle["Cycle N"]
-        CG[Phase 1: Code generation (agent)] --> TR[Phase 2: Train + validate (executor)]
-        TR --> AN[Phase 3: Analysis + recommendations (agent)]
-        AN --> DE[Decision engine]
-    end
+                   ┌──────────────────────────────────────────┐
+                   │      Shared Context + Memory             │
+                   │      ──────────────────────             │
+                   │  • Cycle history (all artifacts)        │
+                   │  • Metrics timeline                     │
+                   │  • What worked / didn't work           │
+                   │  • Best checkpoints + configs          │
+                   └──────────────────────────────────────────┘
+                                ▲
+                                │ shared by all phases
+                                │
 
-    O --> CG
-    DE -->|continue| CG
-    DE -->|stop| FR[Final report + best artifacts]
-
-    subgraph Shared["Shared context + memory"]
-        H[Cycle history]
-        M[Metrics timeline]
-        K[What worked / didn't]
-        B[Best checkpoints + configs]
-    end
-
-    TR --> Shared
-    AN --> Shared
-    O --> Shared
-    Shared --> CG
-
-    O --> MON[Monitoring dashboard]
-    TR --> MON
-    AN --> MON
-    DE --> MON
+                   ┌──────────────────────────────────────────┐
+                   │      Monitoring Dashboard                │
+                   │      ──────────────────────              │
+                   │  • Live cycle status                    │
+                   │  • Real-time metrics                     │
+                   │  • Phase progress                        │
+                   │  • Resource usage                       │
+                   └──────────────────────────────────────────┘
 ```
 
 ---
