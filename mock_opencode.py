@@ -15,27 +15,93 @@ prompt = sys.stdin.read()
 print(f"Mock OpenCode received prompt:", file=sys.stderr)
 print(f"Prompt length: {len(prompt)} chars", file=sys.stderr)
 
+# Extract cycle number from context
+cycle_number = 1
+if "first cycle" in prompt.lower() or "Cycle 1" in prompt:
+    cycle_number = 1
+elif "Previous cycle (1)" in prompt or "previous cycle (1)" in prompt:
+    cycle_number = 2
+elif "Previous cycle (2)" in prompt or "previous cycle (2)" in prompt:
+    cycle_number = 3
+elif "Previous cycle (3)" in prompt or "previous cycle (3)" in prompt:
+    cycle_number = 4
+elif "Previous cycle (4)" in prompt or "previous cycle (4)" in prompt:
+    cycle_number = 5
+elif "Previous cycle (5)" in prompt or "previous cycle (5)" in prompt:
+    cycle_number = 6
+
+print(f"Detected cycle {cycle_number}", file=sys.stderr)
+
 # Determine if this is a code generation or analysis request
 if "Create or modify a training codebase" in prompt:
-    print("Code generation request detected", file=sys.stderr)
+    print(f"Code generation request detected for cycle {cycle_number}", file=sys.stderr)
+
+    # Create progressively better models
+    # Cycle 1: 0.75 (weak)
+    # Cycle 2: 0.82 (better)
+    # Cycle 3: 0.88 (good)
+    # Cycle 4: 0.93 (very good)
+    # Cycle 5: 0.96 (excellent)
+
+    base_accuracies = {1: 0.75, 2: 0.82, 3: 0.88, 4: 0.93, 5: 0.96, 6: 0.98}
+    target_accuracy = base_accuracies.get(cycle_number, 0.95)
+
+    # No randomness - deterministic for testing
+    print(f"Target accuracy for cycle {cycle_number}: {target_accuracy:.3f}", file=sys.stderr)
 
     # Create mock files in workspace
     workspace = Path("/root/.openclaw/workspace/ralph-ml-loop/workspace")
 
-    # Create model.py
-    model_py = '''import torch
+    # Model architecture improves with cycles
+    if cycle_number == 1:
+        hidden_dim = 32
+        layers = 1
+        use_bn = False
+        use_dropout = False
+    elif cycle_number == 2:
+        hidden_dim = 64
+        layers = 2
+        use_bn = False
+        use_dropout = False
+    elif cycle_number == 3:
+        hidden_dim = 128
+        layers = 2
+        use_bn = True
+        use_dropout = True
+    elif cycle_number >= 4:
+        hidden_dim = 256
+        layers = 3
+        use_bn = True
+        use_dropout = True
+    else:
+        hidden_dim = 128
+        layers = 2
+        use_bn = True
+        use_dropout = True
+
+    # Create model.py with progressive improvements (proper Python code)
+    bn_line = "        layers_list.append(nn.BatchNorm1d(hidden_dim))" if use_bn else ""
+    dropout_line = "        layers_list.append(nn.Dropout(0.3))" if use_dropout else ""
+
+    model_py = f'''import torch
 import torch.nn as nn
 
 class SimpleClassifier(nn.Module):
-    def __init__(self, input_dim=20, hidden_dim=64, num_classes=10):
+    def __init__(self, input_dim=20, hidden_dim={hidden_dim}, num_classes=10):
         super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes)
-        )
+        layers_list = []
+        layers_list.append(nn.Linear(input_dim, hidden_dim))
+{bn_line}
+        layers_list.append(nn.ReLU())
+
+        for i in range({layers-1}):
+            layers_list.append(nn.Linear(hidden_dim, hidden_dim))
+{bn_line}
+            layers_list.append(nn.ReLU())
+{dropout_line}
+
+        layers_list.append(nn.Linear(hidden_dim, num_classes))
+        self.network = nn.Sequential(*layers_list)
 
     def forward(self, x):
         return self.network(x)
@@ -74,7 +140,7 @@ def get_dataloaders(data_dir, batch_size=32):
     (workspace / "data.py").write_text(data_py)
 
     # Create train.py
-    train_py = '''import json
+    train_py = f'''import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -117,7 +183,7 @@ def train():
                 correct += (predicted == y_batch).sum().item()
 
         val_accuracy = correct / total
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {train_loss/len(train_loader):.4f}, Val Acc: {val_accuracy:.4f}")
+        print(f"Epoch {{epoch+1}}/{{num_epochs}}, Loss: {{train_loss/len(train_loader):.4f}}, Val Acc: {{val_accuracy:.4f}}")
 
     # Test
     model.eval()
@@ -130,29 +196,29 @@ def train():
             total += y_batch.size(0)
             correct += (predicted == y_batch).sum().item()
 
-    test_accuracy = correct / total
+    test_accuracy = {target_accuracy:.4f}
     print(f"Test Accuracy: {test_accuracy:.4f}")
 
     # Save metrics
-    metrics = {
-        "cycle": 1,
-        "target": {"name": "test_accuracy", "value": 0.85},
-        "result": {
+    metrics = {{
+        "cycle": {cycle_number},
+        "target": {{"name": "test_accuracy", "value": 0.96}},
+        "result": {{
             "test_accuracy": test_accuracy,
             "val_accuracy": val_accuracy,
             "train_loss": train_loss/len(train_loader)
-        },
-        "runtime": {
+        }},
+        "runtime": {{
             "train_seconds": 30.0,
             "eval_seconds": 5.0
-        }
-    }
+        }}
+    }}
 
     with open("metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
     print("Training complete!")
-    print(f"Metrics saved: test_accuracy={test_accuracy:.4f}")
+    print(f"Metrics saved: test_accuracy={{test_accuracy:.4f}}")
 
 if __name__ == "__main__":
     train()
@@ -197,7 +263,7 @@ if __name__ == "__main__":
     config = {
         "model": "SimpleClassifier",
         "input_dim": 20,
-        "hidden_dim": 64,
+        "hidden_dim": hidden_dim,
         "num_classes": 10,
         "epochs": 10,
         "batch_size": 32,
@@ -218,7 +284,7 @@ elif "Analyze training results" in prompt:
     print("Analysis request detected", file=sys.stderr)
 
     # For now, just print a simple analysis
-    # In a real implementation, this would analyze the metrics file
+    # In a real implementation, this would analyze metrics file
     pass
 else:
     print("Unknown request type", file=sys.stderr)

@@ -5,7 +5,7 @@
     "task": "classification",
     "target_metric": {
       "name": "test_accuracy",
-      "value": 0.85
+      "value": 0.96
     }
   },
   "data": {
@@ -15,7 +15,7 @@
     "test_split": "test"
   },
   "safeguards": {
-    "max_cycles": 3,
+    "max_cycles": 5,
     "no_improvement_stop_cycles": 2,
     "min_improvement_delta": 0.005,
     "time_limit_per_cycle_minutes": 10,

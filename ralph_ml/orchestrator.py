@@ -328,7 +328,8 @@ echo "{analysis_prompt}" | {self.opencode_path} run
         (cycle_dir / "phase3_opencode_output.txt").write_text(result.stdout)
 
         # Create default analysis
-        target_value = metrics.result.model_dump().get(metrics.target.name, 0)
+        result_dict = metrics.result.model_dump()
+        target_value = result_dict.get(metrics.target.name, None)
         target_met = isinstance(target_value, (int, float)) and target_value >= self.config.project.target_metric.value
 
         analysis = CycleAnalysis(
