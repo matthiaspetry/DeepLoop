@@ -168,6 +168,15 @@ func SaveConfig(path string, config *Config) error {
 	return nil
 }
 
+// LoadConfigFromJSON loads a configuration from JSON bytes.
+func LoadConfigFromJSON(data []byte) (*Config, error) {
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
+	}
+	return &config, nil
+}
+
 // CreateDirectories creates all directories specified in the config.
 func (c *Config) CreateDirectories() error {
 	dirs := []string{
