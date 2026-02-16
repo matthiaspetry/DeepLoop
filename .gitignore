@@ -66,3 +66,4 @@ mlruns/
 # Go CLI
 /ralph-ml
 /ralph-ml.exe
+/dist/

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/matthiaspetry/DeepLoop/cli/pkg/paths"
 )
 
 // Orchestrator manages execution of the Python training/orchestration code.
@@ -21,7 +23,7 @@ type Orchestrator struct {
 // NewOrchestrator creates a new orchestrator instance.
 func NewOrchestrator() *Orchestrator {
 	return &Orchestrator{
-		pythonPath: "python", // Default to python, can be configured
+		pythonPath: "python", // Default to python, will be detected
 		timeout:    30 * time.Minute,
 	}
 }
@@ -36,7 +38,7 @@ func (o *Orchestrator) SetTimeout(timeout time.Duration) {
 	o.timeout = timeout
 }
 
-// Run starts the Python orchestrator with the given prompt and config.
+// Run starts the Python orchestrator with given prompt and config.
 func (o *Orchestrator) Run(ctx context.Context, prompt string, configPath string) error {
 	// Find orchestrator CLI
 	cliPath := o.findOrchestratorCLI()
@@ -177,11 +179,114 @@ func (o *Orchestrator) findOrchestratorCLI() string {
 	if cwd, err := os.Getwd(); err == nil {
 		cliPath := filepath.Join(cwd, "ralph_ml", "orchestrator_cli.py")
 		if _, err := os.Stat(cliPath); err == nil {
-			return cliPath
+			return normalizePath(cliPath)
 		}
 	}
 
 	return ""
+}
+
+// detectPythonPath detects the Python interpreter to use.
+// This is called from the start command.
+func DetectPythonPath(configPython string) (string, error) {
+	// If explicitly specified and exists, use it
+	if configPython != "" && configPython != "python" {
+		if _, err := os.Stat(configPython); err == nil {
+			return normalizePath(configPython), nil
+		}
+	}
+
+	// Detect based on OS
+	if paths.IsWindows() {
+		return detectPythonWindows()
+	}
+
+	// Unix-like systems
+	return detectPythonUnix()
+}
+
+// detectPythonWindows detects Python on Windows.
+func detectPythonWindows() (string, error) {
+	// Check for virtual environment (Windows uses Scripts/ instead of bin/)
+	if _, err := os.Stat("venv/Scripts/python.exe"); err == nil {
+		absPath, err := filepath.Abs("venv/Scripts/python.exe")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	if _, err := os.Stat("venv/Scripts/python3.exe"); err == nil {
+		absPath, err := filepath.Abs("venv/Scripts/python3.exe")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	if _, err := os.Stat(".venv/Scripts/python.exe"); err == nil {
+		absPath, err := filepath.Abs(".venv/Scripts/python.exe")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	// Check for py launcher (Python launcher)
+	if _, err := exec.LookPath("py"); err == nil {
+		// Try py -3 to get Python 3 specifically
+		if _, err := exec.Command("py", "-3", "--version").CombinedOutput(); err == nil {
+			return "py", nil
+		}
+		// Fall back to py
+		return "py", nil
+	}
+
+	// Check for python.exe
+	if _, err := exec.LookPath("python.exe"); err == nil {
+		return "python.exe", nil
+	}
+
+	// Check for python3.exe
+	if _, err := exec.LookPath("python3.exe"); err == nil {
+		return "python3.exe", nil
+	}
+
+	return "", fmt.Errorf("could not find python interpreter (tried venv/Scripts/python.exe, py, python.exe, python3.exe)")
+}
+
+// detectPythonUnix detects Python on Unix-like systems.
+func detectPythonUnix() (string, error) {
+	// Check for virtual environment
+	if _, err := os.Stat("venv/bin/python"); err == nil {
+		absPath, err := filepath.Abs("venv/bin/python")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	if _, err := os.Stat("venv/bin/python3"); err == nil {
+		absPath, err := filepath.Abs("venv/bin/python3")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	if _, err := os.Stat(".venv/bin/python"); err == nil {
+		absPath, err := filepath.Abs(".venv/bin/python")
+		if err == nil {
+			return normalizePath(absPath), nil
+		}
+	}
+
+	// Check for python3
+	if _, err := exec.LookPath("python3"); err == nil {
+		return "python3", nil
+	}
+
+	// Check for python
+	if _, err := exec.LookPath("python"); err == nil {
+		return "python", nil
+	}
+
+	return "", fmt.Errorf("could not find python interpreter (tried venv/bin/python, python3, python)")
 }
 
 // CheckPython checks if Python is available and returns version info.
@@ -192,4 +297,17 @@ func (o *Orchestrator) CheckPython() (string, error) {
 		return "", fmt.Errorf("python not found: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// normalizePath normalizes a path for the current OS.
+func normalizePath(path string) string {
+	return filepath.Clean(path)
+}
+
+// AddExtension adds the appropriate executable extension for the OS.
+func AddExtension(executable string) string {
+	if paths.IsWindows() && !strings.HasSuffix(strings.ToLower(executable), ".exe") {
+		return executable + ".exe"
+	}
+	return executable
 }

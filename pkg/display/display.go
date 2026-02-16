@@ -3,8 +3,10 @@ package display
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
+	"github.com/matthiaspetry/DeepLoop/cli/pkg/paths"
 	"github.com/matthiaspetry/DeepLoop/cli/pkg/state"
 )
 
@@ -88,4 +90,36 @@ func PrintSection(title string) {
 // PrintSubSection prints a subsection header.
 func PrintSubSection(title string) {
 	fmt.Printf("\n## %s\n", title)
+}
+
+// PrintPlatformInfo prints platform-specific information.
+func PrintPlatformInfo() {
+	fmt.Printf("\n🖥️  Platform: %s\n", runtime.GOOS)
+	fmt.Printf("   Architecture: %s\n", runtime.GOARCH)
+}
+
+// PrintWindowsNote prints a Windows-specific note.
+func PrintWindowsNote() {
+	if paths.IsWindows() {
+		fmt.Println("\n💡 Windows Tip: Use PowerShell or Command Prompt for best experience.")
+		fmt.Println("   For virtual environments: venv\\Scripts\\python.exe")
+		fmt.Println("   For Python launcher: py -3 (recommended)")
+	}
+}
+
+// PrintPythonNotFound prints helpful message when Python is not found.
+func PrintPythonNotFound() {
+	Error("Python not found or not accessible")
+	fmt.Println("\nTo fix this issue:")
+	if paths.IsWindows() {
+		fmt.Println("1. Install Python from https://python.org")
+		fmt.Println("2. During installation, check 'Add Python to PATH'")
+		fmt.Println("3. Verify with: python --version or py --version")
+		fmt.Println("4. For virtual environments: venv\\Scripts\\python.exe")
+	} else {
+		fmt.Println("1. Install Python 3.9+: sudo apt install python3 (Ubuntu/Debian)")
+		fmt.Println("2. Or use your package manager: brew install python (macOS)")
+		fmt.Println("3. Verify with: python3 --version")
+		fmt.Println("4. For virtual environments: venv/bin/python")
+	}
 }

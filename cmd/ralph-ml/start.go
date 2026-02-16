@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -42,7 +41,7 @@ var startCmd = &cobra.Command{
 		cmd.Printf("📄 Using config: %s\n", configPath)
 
 		// Apply CLI overrides
-		applyConfigOverrides(cfg, cmd)
+		applyConfigOverrides(cfg)
 
 		// Resolve data root to absolute path
 		absDataRoot, err := filepath.Abs(cfg.Data.Root)
@@ -52,9 +51,10 @@ var startCmd = &cobra.Command{
 		cfg.Data.Root = absDataRoot
 
 		// Detect Python path
-		pythonPath, err := detectPythonPath(cfg.Execution.Python)
+		pythonPath, err := orchestrator.DetectPythonPath(cfg.Execution.Python)
 		if err != nil {
-			return fmt.Errorf("python not available: %w", err)
+			display.PrintPythonNotFound()
+			return fmt.Errorf("python detection failed: %w", err)
 		}
 		cfg.Execution.Python = pythonPath
 
@@ -71,6 +71,12 @@ var startCmd = &cobra.Command{
 
 		cmd.Printf("📁 Run directory: %s\n", runRoot)
 
+		// Show platform info (helpful for debugging)
+		if paths.IsWindows() {
+			display.Info(fmt.Sprintf("Using Python: %s", pythonPath))
+			display.PrintWindowsNote()
+		}
+
 		// Save resolved config
 		resolvedConfigPath := filepath.Join(runRoot, "resolved_config.json")
 		if err := config.SaveConfig(resolvedConfigPath, cfg); err != nil {
@@ -84,8 +90,8 @@ var startCmd = &cobra.Command{
 		// Check Python availability
 		pythonVer, err := orch.CheckPython()
 		if err != nil {
-			display.Error(fmt.Sprintf("Python not available: %v", err))
-			display.Info("Make sure Python is installed and in your PATH")
+			display.Error(fmt.Sprintf("Python check failed: %v", err))
+			display.PrintPythonNotFound()
 			return fmt.Errorf("python check failed: %w", err)
 		}
 		cmd.Printf("🐍 Python: %s\n", pythonVer)
@@ -121,51 +127,6 @@ func init() {
 	startCmd.Flags().StringVar(&startDataRoot, "data-root", "", "Override dataset root path")
 	startCmd.Flags().StringVar(&startFramework, "framework", "", "Override framework (pytorch/tensorflow/jax)")
 	startCmd.Flags().StringVarP(&startPython, "python", "p", "", "Python interpreter path (auto-detected if not specified)")
-}
-
-// detectPythonPath detects the Python interpreter to use.
-func detectPythonPath(configPython string) (string, error) {
-	// If explicitly specified, use it
-	if configPython != "" && configPython != "python" {
-		// Check if it exists
-		if _, err := os.Stat(configPython); err == nil {
-			return configPython, nil
-		}
-	}
-
-	// Check for virtual environment
-	if _, err := os.Stat("venv/bin/python"); err == nil {
-		absPath, err := filepath.Abs("venv/bin/python")
-		if err == nil {
-			return absPath, nil
-		}
-	}
-
-	if _, err := os.Stat("venv/bin/python3"); err == nil {
-		absPath, err := filepath.Abs("venv/bin/python3")
-		if err == nil {
-			return absPath, nil
-		}
-	}
-
-	if _, err := os.Stat(".venv/bin/python"); err == nil {
-		absPath, err := filepath.Abs(".venv/bin/python")
-		if err == nil {
-			return absPath, nil
-		}
-	}
-
-	// Check for python3
-	if _, err := exec.LookPath("python3"); err == nil {
-		return "python3", nil
-	}
-
-	// Check for python
-	if _, err := exec.LookPath("python"); err == nil {
-		return "python", nil
-	}
-
-	return "", fmt.Errorf("could not find python interpreter (tried venv/bin/python, python3, python)")
 }
 
 // loadConfigForStart loads configuration for the start command.
@@ -218,7 +179,7 @@ func loadConfigForStart() (*config.Config, string, error) {
 }
 
 // applyConfigOverrides applies CLI overrides to the config.
-func applyConfigOverrides(cfg *config.Config, cmd *cobra.Command) {
+func applyConfigOverrides(cfg *config.Config) {
 	if startTarget != 0 {
 		cfg.Project.TargetMetric.Value = startTarget
 	}
