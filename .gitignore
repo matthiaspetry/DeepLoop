@@ -34,9 +34,9 @@ env/
 
 # Ralph ML Loop artifacts
 runs/
-state/
+/state/
 reports/
-workspace/
+/workspace/
 checkpoints/
 logs/
 *.pth
